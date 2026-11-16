@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>App 1: Maturity Explorer | AI for Deformation Monitoring</title>
+<meta name="description" content="See which methods suit a monitoring task and how mature each one is.">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="top"><div class="wrap"><span class="book">AI for Deformation Monitoring &middot; companion apps</span><a class="home" href="../index.html">&larr; All apps</a></div></header>
+<main class="wrap">
+<h1>App 1: Maturity Explorer</h1>
+<p class="sub">Chapter 1 &middot; <span class="badge est">Established</span> <span class="badge early">Early adoption</span> <span class="badge exp">Experimental</span></p>
+<p>Pick a monitoring task to see which methods can help, how mature each one is today, and where it is explained in the book (Appendix A of the book describes every method). The labels follow Chapter 1: <strong>Established</strong> methods can be used routinely; <strong>Early adoption</strong> methods should be run alongside an established one; <strong>Experimental</strong> methods are for study and trials only.</p>
+<div class="layout">
+  <aside class="panel controls"><h3>Choose</h3><div id="controls"></div>
+    <p class="small">Tip: choose "All methods" to see the whole map at once.</p></aside>
+  <section class="out">
+    <div class="panel"><h2 id="taskTitle" style="margin-top:0"></h2><p id="taskText" class="small"></p><div id="cols" class="grid3"></div></div>
+    <div class="panel"><h2 style="margin-top:0">What the labels mean</h2><div id="legend" class="scroll"></div></div>
+    <div class="panel note"><p><strong>Overall verdict.</strong> Taken as a whole, AI in deformation monitoring is in <strong>early adoption</strong>: the methods work on real data and some practitioners use them, mainly to screen data and give earlier notice of trends, but they are not yet standard practice. Deep learning, and warnings issued by AI without a person reviewing them, are still <strong>experimental</strong>. Monitoring codes set trigger levels on measured values and do not yet provide for AI to replace those checks.</p></div>
+  </section>
+</div>
+<style>.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}@media(max-width:820px){.grid3{grid-template-columns:1fr}}
+.col h3{font-size:14px;margin:0 0 8px}.m{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:8px;background:var(--bg)}
+.m b{display:block}.m span{font-size:12.5px;color:var(--muted)}</style>
+<footer>Copyright &copy; 2026 Yam Khoon Tor. All rights reserved. Companion app to <em>AI for Deformation Monitoring: Anomaly Detection, Trend Analysis and Early Warning for Surveyors and Engineers</em>. For readers’ personal study only. All data are simulated and illustrative; results will be similar to, but not always identical with, the figures in the book. This app is for education and does not replace professional judgement, project specifications or statutory requirements.</footer>
+</main>
+<script src="../assets/core.js"></script>
+<script src="../assets/plot.js"></script>
+<script src="../assets/ml.js"></script>
+<script>
+"use strict";
+const M = [
+  { name: "Robust (MAD) screen", level: "Established", ch: "2, 4", tasks: ["gross", "faults"], note: "Flags gross errors without being fooled by them." },
+  { name: "Least squares trend and velocity test", level: "Established", ch: "3", tasks: ["drift", "forecast", "explain"], note: "Is it moving, how fast, and is that significant?" },
+  { name: "Huber robust fit", level: "Established", ch: "3", tasks: ["gross", "drift"], note: "Keeps a trend honest when a few readings are wrong." },
+  { name: "Kalman filter", level: "Established", ch: "3, 9, 11", tasks: ["gross", "drift", "forecast", "warning"], note: "Follows position and velocity; its surprise value flags the unexpected." },
+  { name: "Congruence test", level: "Established", ch: "3", tasks: ["faults"], note: "Has the control network kept its shape between campaigns?" },
+  { name: "CUSUM and EWMA control charts", level: "Established", ch: "4", tasks: ["drift", "gross"], note: "Catch slow drift long before a trigger level is reached." },
+  { name: "Rate-of-change rule", level: "Established", ch: "4", tasks: ["drift", "warning"], note: "Rates from a fitted line, never from two readings." },
+  { name: "Trigger-level checks", level: "Established", ch: "11, 12", tasks: ["warning"], note: "The formal basis of every response; set by the design and the authority." },
+  { name: "Time to threshold from the trend", level: "Established", ch: "11", tasks: ["warning"], note: "Distance to go divided by the velocity, with its uncertainty: days of notice." },
+  { name: "Inverse-velocity method", level: "Established", ch: "11", tasks: ["warning"], note: "For accelerating slopes: extend 1/velocity to zero to estimate the failure time." },
+  { name: "Thermal regression and decomposition", level: "Established", ch: "8, 14", tasks: ["thermal"], note: "Separate the daily swing from real movement." },
+  { name: "Mahalanobis distance on prism groups", level: "Early adoption", ch: "5", tasks: ["ring"], note: "A classical statistic, newly applied to prism groups; the best balance in the Chapter 5 example." },
+  { name: "Regression on causes, with VIF", level: "Established", ch: "10", tasks: ["explain"], note: "Effects with standard deviations; watch for causes that move together." },
+  { name: "Isolation Forest", level: "Early adoption", ch: "5, 6", tasks: ["ring", "gross"], note: "Fast and popular, but missed single-prism faults in the 24-reading ring." },
+  { name: "Local Outlier Factor", level: "Early adoption", ch: "5", tasks: ["ring"], note: "Compares how crowded each reading's neighbourhood is." },
+  { name: "One-Class SVM", level: "Early adoption", ch: "5", tasks: ["ring"], note: "Draws a boundary round normal data; sensitive to its settings." },
+  { name: "Change-point detection (PELT)", level: "Early adoption", ch: "8", tasks: ["thermal", "drift"], note: "Finds when the rate of movement changes; compare with the site log." },
+  { name: "Autoregressive time-series forecasts", level: "Early adoption", ch: "9", tasks: ["forecast"], note: "A strong statistical benchmark; as decision support in monitoring, still early adoption." },
+  { name: "Gradient boosting forecasts", level: "Early adoption", ch: "9, 10", tasks: ["forecast", "explain"], note: "Can use planned excavation depth; needs a calibrated band." },
+  { name: "Conformal prediction bands", level: "Early adoption", ch: "9", tasks: ["forecast", "warning"], note: "Makes any forecast's 95 % band honest." },
+  { name: "Probability-based early warning", level: "Early adoption", ch: "11", tasks: ["warning"], note: "Advance notice, reviewed by a person before any action." },
+  { name: "Fault-cause classifier (random forest)", level: "Early adoption", ch: "7", tasks: ["faults"], note: "Suggests a likely cause; only as good as past reviews." },
+  { name: "AI assistant for analysis software", level: "Early adoption", ch: "15", tasks: ["software"], note: "Fast drafting; every result must be tested." },
+  { name: "LSTM autoencoder", level: "Experimental", ch: "6", tasks: ["ring", "thermal"], note: "Learns cycles and patterns; needs months of data; hard to explain." },
+  { name: "Deep-learning forecasts", level: "Experimental", ch: "9", tasks: ["forecast"], note: "Promising in research; site-specific calibration needed." },
+  { name: "SHAP explanations", level: "Experimental", ch: "10", tasks: ["explain"], note: "Useful for exploring a model; not yet evidence in a report." },
+  { name: "AI-issued warnings without review", level: "Experimental", ch: "11, 12", tasks: ["warning"], note: "Not recommended: a person must review every warning." },
+  { name: "Digital twins with AI", level: "Experimental", ch: "16", tasks: ["forecast", "explain"], note: "Much discussed, mainly research and pilot projects." },
+];
+const TASKS = [
+  { value: "all", label: "All methods", text: "Every method in the book, grouped by maturity." },
+  { value: "gross", label: "Screen readings for gross errors", text: "Wrong-target readings, spikes and blunders in automated data." },
+  { value: "drift", label: "Detect slow drift or a change of rate", text: "Movement too small to see reading by reading, but steady." },
+  { value: "ring", label: "Detect a tunnel ring changing shape", text: "Group behaviour that no single prism shows." },
+  { value: "faults", label: "Tell an instrument fault from real movement", text: "Knocked prisms, disturbed stations, refraction, multipath." },
+  { value: "thermal", label: "Separate thermal movement from real movement", text: "Buildings and bridges breathe with the sun." },
+  { value: "forecast", label: "Forecast movement hours to days ahead", text: "Projecting where a point is heading, with an honest band." },
+  { value: "explain", label: "Explain why a structure is moving", text: "Linking movement to excavation, groundwater and temperature." },
+  { value: "warning", label: "Give early warning before a trigger level", text: "Time to threshold, probability and escalation." },
+  { value: "software", label: "Write and check analysis software", text: "Working with AI assistants." },
+];
+const LEVELS = ["Established", "Early adoption", "Experimental"];
+const st = AD.controls("#controls", [{ key: "task", type: "select", label: "Monitoring task", value: "all", options: TASKS }], render);
+function render() {
+  const t = TASKS.find((x) => x.value === st.task);
+  document.getElementById("taskTitle").textContent = t.label;
+  document.getElementById("taskText").textContent = t.text;
+  const box = document.getElementById("cols"); box.innerHTML = "";
+  for (const L of LEVELS) {
+    const items = M.filter((m) => m.level === L && (st.task === "all" || m.tasks.includes(st.task)));
+    const col = AD.el("div", { class: "col" }, AD.el("h3", {}, AD.badge(L), " ", items.length + (items.length === 1 ? " method" : " methods")));
+    if (!items.length) col.append(AD.el("p", { class: "small" }, "None for this task."));
+    for (const m of items) col.append(AD.el("div", { class: "m" }, AD.el("b", {}, m.name), AD.el("span", {}, m.note + " Chapter " + m.ch + ".")));
+    box.append(col);
+  }
+}
+AD.table("#legend", ["Label", "What it means", "How to use it"], [
+  [AD.badge("Established"), "Long used in surveying or engineering practice; known statistical behaviour", "Use routinely, with normal checks"],
+  [AD.badge("Early adoption"), "Proven on real monitoring data and in use by some practitioners; not yet standard", "Use alongside an established method; compare results"],
+  [AD.badge("Experimental"), "Promising in research; little field experience; hard to explain", "Use only for study or trials, never as the sole basis of a decision"]]);
+render();
+
+</script>
+</body>
+</html>

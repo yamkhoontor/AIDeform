@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>App 8: Thermal Separation | AI for Deformation Monitoring</title>
+<meta name="description" content="Separate trend from the thermal cycle and find when the rate of movement changes.">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="top"><div class="wrap"><span class="book">AI for Deformation Monitoring &middot; companion apps</span><a class="home" href="../index.html">&larr; All apps</a></div></header>
+<main class="wrap">
+<h1>App 8: Thermal Separation</h1>
+<p class="sub">Chapter 8 &middot; <span class="badge est">Established</span> <span class="badge early">Early adoption</span></p>
+<p>A building corner beside a cut-and-cover tunnel is read every 30 minutes for 90 days. Its readings swing every day with the sun and settle faster while the excavation passes. Split the record into trend, daily cycle and what is left; check that the cycle is thermal; and let change-point detection find the days when the rate of settlement changed.</p>
+<div class="layout">
+  <aside class="panel controls"><h3>Settings</h3><div id="controls"></div></aside>
+  <section class="out">
+    <div class="panel"><div class="kpis" id="kpis"></div></div>
+    <div class="panel"><div class="chartbox"><canvas id="c1"></canvas></div><div class="chartbox"><canvas id="c2"></canvas></div></div>
+    <div class="panel grid2"><div class="chartbox"><canvas id="c3"></canvas></div><div class="chartbox"><canvas id="c4"></canvas></div></div>
+    <div class="panel"><h2 style="margin-top:0">Change points against the construction log</h2><div id="tab" class="scroll"></div></div>
+    <div class="panel note"><p><strong>What to notice.</strong> With the thermal part removed, change-point detection finds the stages of the excavation within a few days. The delay between air temperature and the cycle shows the structure warming up. Raise the penalty and it finds fewer changes; lower it and it starts chasing noise. A change with no matching site event deserves investigation.</p></div>
+  </section>
+</div>
+<footer>Copyright &copy; 2026 Yam Khoon Tor. All rights reserved. Companion app to <em>AI for Deformation Monitoring: Anomaly Detection, Trend Analysis and Early Warning for Surveyors and Engineers</em>. For readers’ personal study only. All data are simulated and illustrative; results will be similar to, but not always identical with, the figures in the book. This app is for education and does not replace professional judgement, project specifications or statutory requirements.</footer>
+</main>
+<script src="../assets/core.js"></script>
+<script src="../assets/plot.js"></script>
+<script src="../assets/ml.js"></script>
+<script>
+"use strict";
+const S = AD.stats, C = AD.colours;
+const st = AD.controls("#controls", [
+  { key: "coef", label: "Thermal response", min: 0, max: 1, step: 0.02, value: 0.4, unit: "mm/°C" },
+  { key: "lag", label: "Thermal delay", min: 0, max: 6, step: 0.5, value: 2, unit: "h" },
+  { key: "swing", label: "Daily air temperature swing (±)", min: 1, max: 6, step: 0.5, value: 3, unit: "°C" },
+  { key: "noise", label: "Reading noise", min: 0.1, max: 1, step: 0.05, value: 0.4, unit: "mm" },
+  { key: "r1", label: "Settlement rate, days 0–23", min: 0, max: 0.2, step: 0.005, value: 0.02, unit: "mm/day", decimals: 3 },
+  { key: "r2", label: "Rate while excavation passes, days 23–51", min: 0, max: 0.3, step: 0.005, value: 0.09, unit: "mm/day", decimals: 3 },
+  { key: "r3", label: "Rate afterwards, days 51–90", min: 0, max: 0.2, step: 0.005, value: 0.042, unit: "mm/day", decimals: 3 },
+  { key: "pen", label: "Change-point penalty (× automatic)", min: 0.25, max: 10, step: 0.25, value: 4 },
+  { key: "seed", label: "Random seed", min: 1, max: 50, step: 1, value: 9 }], render);
+const ND = 90, PER = 48, n = ND * PER;
+function pelt(y, pen, minSize = 5) {   // PELT with a straight-line cost per segment
+  const N = y.length, cs = (v) => { const c = [0]; v.forEach((x) => c.push(c[c.length - 1] + x)); return c; }, t = S.range(N);
+  const S1 = cs(t.map(() => 1)), St = cs(t), Stt = cs(t.map((x) => x * x)), Sy = cs(y), Sty = cs(t.map((x, i) => x * y[i])), Syy = cs(y.map((v) => v * v));
+  const cost = (a, b) => { const m = S1[b] - S1[a], st_ = St[b] - St[a], stt = Stt[b] - Stt[a], sy = Sy[b] - Sy[a], sty = Sty[b] - Sty[a], syy = Syy[b] - Syy[a];
+    const det = m * stt - st_ * st_; if (det <= 0) return syy - sy * sy / m; const b1 = (m * sty - st_ * sy) / det, b0 = (sy - b1 * st_) / m; return syy - b0 * sy - b1 * sty; };
+  const F = new Array(N + 1).fill(Infinity), last = new Array(N + 1).fill(0); F[0] = -pen; let cand = [0];
+  for (let b = minSize; b <= N; b++) { const ok = cand.filter((a) => b - a >= minSize); if (!ok.length) continue;
+    const vals = ok.map((a) => F[a] + cost(a, b) + pen); const i = vals.indexOf(Math.min(...vals)); F[b] = vals[i]; last[b] = ok[i];
+    cand = cand.filter((a) => { const k = ok.indexOf(a); return k < 0 || vals[k] - pen <= F[b]; }).concat([b]); }
+  const cps = []; let b = N; while (b > 0) { cps.push(last[b]); b = last[b]; } return cps.filter((c) => c > 0).sort((a, b) => a - b);
+}
+function render() {
+  const R = AD.rng(st.seed * 101), day = S.range(n).map((i) => i / PER), hour = S.range(n).map((i) => (i % PER) / 2);
+  const dOff = S.range(ND).map(() => R.normal(0, 0.7)), temp = hour.map((h, i) => 29 + st.swing * Math.sin(2 * Math.PI * (h - 9) / 24) + dOff[Math.floor(i / PER)]);
+  const L = Math.round(st.lag * 2), tlag = temp.map((_, i) => temp[Math.max(0, i - L)]), tmean = S.mean(temp);
+  let tr = 0; const trend = day.map((d) => (tr -= (d < 23 ? st.r1 : d < 51 ? st.r2 : st.r3) / PER));
+  const y = day.map((_, i) => trend[i] + st.coef * (tlag[i] - tmean) + R.normal(0, st.noise));
+  // classical decomposition: 24-hour centred moving average, then mean daily profile
+  const ma = S.rolling(y, PER, S.mean, true), detr = y.map((v, i) => v - ma[i]);
+  const prof = S.range(PER).map((k) => S.mean(detr.filter((v, i) => i % PER === k && Number.isFinite(v)))), pm = S.mean(prof);
+  const seas = y.map((_, i) => prof[i % PER] - pm), resid = y.map((v, i) => v - ma[i] - seas[i]);
+  // lag scan: regress the daily cycle on air temperature shifted by 0 to 6 hours
+  const tc = temp.map((v) => v - tmean), lags = S.range(13).map((k) => k / 2);
+  const fits = lags.map((lh) => { const k = Math.round(lh * 2), xs = [], ys = []; for (let i = k; i < n; i++) { xs.push(tc[i - k]); ys.push(seas[i]); }
+    const f = AD.lin.polyfit(xs, ys, 1), pred = xs.map((x) => f.x[0] + f.x[1] * x), m = S.mean(ys);
+    return { lh, a: f.x[1], r2: 1 - S.sum(ys.map((v, i) => (v - pred[i]) ** 2)) / S.sum(ys.map((v) => (v - m) ** 2)) }; });
+  const best = fits.reduce((a, b) => (b.r2 > a.r2 ? b : a));
+  // remove the thermal part, take daily means, find changes of rate
+  const kB = Math.round(best.lh * 2), corr = y.map((v, i) => v - best.a * tc[Math.max(0, i - kB)]);
+  const daily = S.range(ND).map((d) => S.mean(corr.slice(d * PER, (d + 1) * PER)));
+  const sd = S.sd(resid.filter(Number.isFinite)) / Math.sqrt(PER), pen = st.pen * 2 * sd * sd * Math.log(ND);
+  const cps = pelt(daily, pen), bounds = [0, ...cps, ND];
+  const segs = bounds.slice(0, -1).map((a, k) => { const b = bounds[k + 1], t = S.range(b - a, a), f = AD.lin.polyfit(t, daily.slice(a, b), 1); return { a, b, t, f }; });
+  const total = S.sum(segs.map((s) => s.f.x[1] * (s.b - s.a)));
+  const box = document.getElementById("kpis"); box.innerHTML = "";
+  [["Settlement from the trend", total.toFixed(1), "mm over " + ND + " days (true " + (trend[n - 1]).toFixed(1) + ")"], ["Raw daily swing", "±" + ((S.quantile(y.slice(0, 20 * PER), 0.98) - S.quantile(y.slice(0, 20 * PER), 0.02)) / 2).toFixed(1), "mm"],
+   ["Thermal fit", best.a.toFixed(2) + " mm/°C", "best delay " + best.lh + " h, R² " + best.r2.toFixed(2)], ["Change points found", cps.length ? "day " + cps.join(", ") : "none", "true: day 23 and day 51"]].forEach(([k, v, u]) =>
+    box.append(AD.el("div", { class: "kpi" }, AD.el("div", { class: "k" }, k), AD.el("div", { class: "v" }, v), AD.el("div", { class: "u" }, u))));
+  const sp = (a) => a.filter((_, i) => i % 2 === 0), dd = sp(day);
+  AD.plot("#c1", { title: "Raw heights and the trend", height: 230, ylabel: "mm", legend: "top", series: [{ x: dd, y: sp(y), color: C.faint, width: 0.6, label: "raw (30-minute)" }, { x: dd, y: sp(ma), color: C.blue, width: 2, label: "trend (24-hour moving average)" }] });
+  const w7 = S.range(7 * PER, 10 * PER), d7 = w7.map((i) => day[i]);
+  AD.plot("#c2", { title: "One week in close-up (days 10 to 17): air temperature, daily cycle and what is left", height: 220, ylabel: "mm", xlabel: "day", legend: "top",
+    series: [{ x: d7, y: w7.map((i) => resid[i]), color: C.faint, width: 0.8, label: "residual" }, { x: d7, y: w7.map((i) => seas[i]), color: C.green, width: 2, label: "daily cycle" },
+             { x: d7, y: w7.map((i) => (temp[i] - tmean) * 0.25), color: C.orange, width: 1.2, dash: [5, 4], label: "air temperature (scaled)" }] });
+  AD.plot("#c3", { title: "Is the cycle thermal?", height: 230, xlabel: "delay (hours)", ylabel: "R² of fit to temperature", ylim: [0, 1], legend: false,
+    series: [{ x: lags, y: fits.map((f) => f.r2), color: C.blue }, { x: [best.lh], y: [best.r2], type: "points", size: 5, color: C.orange }] });
+  AD.plot("#c4", { title: "Segments found by change-point detection", height: 230, xlabel: "day", ylabel: "mm", legend: false,
+    series: [{ x: S.range(ND), y: daily, type: "points", size: 2.5, color: C.grey }, ...segs.map((s, k) => ({ x: s.t, y: s.t.map((t) => s.f.x[0] + s.f.x[1] * t), color: AD.series[k % 8], width: 2.5 }))],
+    vlines: cps.map((c) => ({ x: c, color: "#777" })) });
+  const log = { 23: "excavation front reaches the building", 51: "excavation front passes the building" };
+  AD.table("#tab", ["Change point", "Rate before → after (mm/day)", "Nearest site event", "Comment"], cps.map((c, k) => { const ev = Object.keys(log).map(Number).find((d) => Math.abs(d - c) <= 3);
+    return ["day " + c, (-segs[k].f.x[1]).toFixed(3) + " → " + (-segs[k + 1].f.x[1]).toFixed(3), ev !== undefined ? "day " + ev + ": " + log[ev] : "none", ev !== undefined ? "explained" : "investigate"]; }),
+    { highlight: (i, r) => r[3] === "investigate" });
+}
+render(); window.addEventListener("resize", () => setTimeout(render, 100));
+
+</script>
+</body>
+</html>

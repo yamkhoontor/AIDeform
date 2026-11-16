@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>App 13: Tunnel Case Study | AI for Deformation Monitoring</title>
+<meta name="description" content="Replay a 120-day tunnel monitoring project with your own trigger levels.">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="top"><div class="wrap"><span class="book">AI for Deformation Monitoring &middot; companion apps</span><a class="home" href="../index.html">&larr; All apps</a></div></header>
+<main class="wrap">
+<h1>App 13: Tunnel Case Study</h1>
+<p class="sub">Chapter 13 &middot; <span class="badge est">Established</span> <span class="badge early">Early adoption</span></p>
+<p>Replay the 120-day project of Chapter 13: a 14 m deep basement beside a railway tunnel, with fifteen monitored rings (R40 to R54), five prisms each. Move the trigger levels and the agreed warning probability, decide whether the engineer acts on an early warning, and see when each escalation stage would have been entered and what happens to ring R47. Data are daily means and illustrative.</p>
+<div class="layout">
+  <aside class="panel controls"><h3>Settings</h3><div id="controls"></div></aside>
+  <section class="out">
+    <div class="panel"><div class="kpis" id="kpis"></div></div>
+    <div class="panel"><div class="chartbox"><canvas id="c1"></canvas></div><div class="chartbox"><canvas id="c2"></canvas></div></div>
+    <div class="panel"><h2 style="margin-top:0">Project log</h2><div id="log" class="scroll"></div></div>
+    <div class="panel note"><p><strong>What to notice.</strong> Untick "the engineer acts on Stage 2" and the extra strut is never installed: R47 carries on past its Alert Level as the excavation deepens. The early warning matters only if someone acts on it. Lower the warning probability and Stage 2 comes earlier; raise it and you rely more on the steady-approach rule.</p></div>
+  </section>
+</div>
+<footer>Copyright &copy; 2026 Yam Khoon Tor. All rights reserved. Companion app to <em>AI for Deformation Monitoring: Anomaly Detection, Trend Analysis and Early Warning for Surveyors and Engineers</em>. For readers’ personal study only. All data are simulated and illustrative; results will be similar to, but not always identical with, the figures in the book. This app is for education and does not replace professional judgement, project specifications or statutory requirements.</footer>
+</main>
+<script src="../assets/core.js"></script>
+<script src="../assets/plot.js"></script>
+<script src="../assets/ml.js"></script>
+<script>
+"use strict";
+const S = AD.stats, C = AD.colours, ML = AD.ml;
+const st = AD.controls("#controls", [
+  { key: "upto", label: "Replay to day", min: 36, max: 120, step: 1, value: 120 },
+  { key: "alert", label: "Alert Level", min: 4, max: 20, step: 0.5, value: 10, unit: "mm" },
+  { key: "wsl", label: "Work Suspension Level", min: 6, max: 30, step: 0.5, value: 15, unit: "mm" },
+  { key: "pw", label: "Warning probability (72 h)", min: 5, max: 90, step: 5, value: 30, unit: "%", decimals: 0 },
+  { key: "act", type: "check", label: "The engineer acts on Stage 2 (extra strut two days later)", value: true },
+  { key: "resp", label: "Ground response", min: 0.5, max: 1.4, step: 0.05, value: 0.9, unit: "mm per m of depth" },
+  { key: "seed", label: "Random seed", min: 1, max: 50, step: 1, value: 15 }], render);
+const RINGS = S.range(15, 40), SHAPE = [1, 0.55, 0.55, -0.45, -0.45], PR = ["crown", "L shoulder", "R shoulder", "L knee", "R knee"];
+const LIFTS = [42, 47, 52, 56, 60, 66, 72], ND = 120, BASE = 35;
+function replay() {
+  const R = AD.rng(st.seed * 37), noise = RINGS.map(() => S.range(ND).map(() => S.range(5).map(() => R.normal(0, 0.3))));
+  const depth = (d) => 2 * LIFTS.filter((l) => l <= d).length;
+  let resp = 0, atStrut = null, strutDay = null, stage2Day = null; const crown = [], stages = [], kfState = [];
+  const obs = RINGS.map(() => []), q = 0.004, sig = 0.3;
+  let x = null, P = null;
+  for (let d = 1; d <= ND; d++) {
+    for (let h = 0; h < 24; h++) { const t = d - 1 + h / 24; let target = st.resp * depth(t);
+      if (strutDay !== null && t >= strutDay) { if (!atStrut) atStrut = [resp, depth(t)]; target = atStrut[0] + 0.15 * (depth(t) - atStrut[1]); }
+      resp += (target - resp) / 72; }
+    RINGS.forEach((r, j) => { const w = Math.exp(-(((r - 47) / 2.5) ** 2)); obs[j].push(SHAPE.map((s, k) => resp * w * s + noise[j][d - 1][k])); });
+    const z = obs[RINGS.indexOf(47)][d - 1][0]; crown.push(z);
+    // Kalman filter (constant velocity, daily) on the R47 crown
+    if (!x) { x = [z, 0]; P = [[sig * sig, 0], [0, 0.1]]; }
+    else { x = [x[0] + x[1], x[1]]; P = [[P[0][0] + P[0][1] + P[1][0] + P[1][1] + q / 3, P[0][1] + P[1][1] + q / 2], [P[1][0] + P[1][1] + q / 2, P[1][1] + q]];
+      const Sv = P[0][0] + sig * sig, K = [P[0][0] / Sv, P[1][0] / Sv], r = z - x[0]; x = [x[0] + K[0] * r, x[1] + K[1] * r];
+      P = [[(1 - K[0]) * P[0][0], (1 - K[0]) * P[0][1]], [P[1][0] - K[1] * P[0][0], P[1][1] - K[1] * P[0][1]]]; }
+    const ahead = ML.kalmanAhead({ d: x[0], v: x[1], P }, 3, { q, sigma: sig });
+    const pA = 1 - AD.dist.normCdf((st.alert - ahead.m) / ahead.s), pW = 1 - AD.dist.normCdf((st.wsl - ahead.m) / ahead.s);
+    const ttl = x[1] > 0.05 ? (st.alert - x[0]) / x[1] : Infinity;
+    let s = 0;
+    if (d > BASE && ((pA >= st.pw / 100 && x[0] < st.alert) || (ttl > 0 && ttl < 7 && x[1] > 0.2))) s = 2;
+    if (z >= st.alert) s = 3; if (pW >= st.pw / 100) s = Math.max(s, 4); if (z >= st.wsl) s = 5;
+    stages.push(s); kfState.push({ d: x[0], v: x[1], pA, ttl });
+    if (s >= 2 && stage2Day === null) { stage2Day = d; if (st.act) strutDay = d + 2; }
+  }
+  return { obs, crown, stages, kfState, strutDay, stage2Day };
+}
+function render() {
+  const { obs, crown, stages, kfState, strutDay, stage2Day } = replay(), U = st.upto, days = S.range(ND, 1);
+  // detectors: per-prism CUSUM and ring Mahalanobis (common mode removed), baseline days 1-35
+  let firstCusum = null, cusumRings = new Set(), firstRing = null, ringRings = new Set();
+  RINGS.forEach((r, j) => {
+    for (let k = 0; k < 5; k++) { const y = obs[j].map((o) => o[k] * Math.sign(SHAPE[k])), base = y.slice(0, BASE), m = S.mean(base), sd = S.sd(base);
+      let sp = 0; for (let d = BASE; d < U; d++) { sp = Math.max(0, sp + (y[d] - m) / sd - 0.5); if (sp > 8) { cusumRings.add(r); if (!firstCusum || d + 1 < firstCusum.d) firstCusum = { d: d + 1, r }; break; } } }
+    const Z = obs[j].map((o) => { const mu = S.mean(o); return o.slice(0, 4).map((v) => v - mu); }), mh = ML.mahalanobis(Z.slice(0, BASE)), lim = AD.dist.chi2Ppf(0.999, 4);
+    let run = 0; for (let d = BASE; d < U; d++) { run = mh(Z[d]) > lim ? run + 1 : 0; if (run >= 2) { ringRings.add(r); if (!firstRing || d < firstRing.d) firstRing = { d: d, r }; break; } }
+  });
+  const shown = crown.slice(0, U), peak = Math.max(...shown), peakDay = shown.indexOf(peak) + 1, sNow = stages[U - 1];
+  const box = document.getElementById("kpis"); box.innerHTML = "";
+  [["R47 crown on day " + U, crown[U - 1].toFixed(1) + " mm", "peak " + peak.toFixed(1) + " mm on day " + peakDay],
+   ["Stage 2 entered", stage2Day && stage2Day <= U ? "day " + stage2Day : "not yet", stage2Day && stage2Day <= U ? (kfState[stage2Day - 1].pA * 100 < st.pw ? "steady-approach rule, " : "probability " + Math.round(kfState[stage2Day - 1].pA * 100) + " %, ") + (Number.isFinite(kfState[stage2Day - 1].ttl) ? kfState[stage2Day - 1].ttl.toFixed(1) + " days to Alert Level" : "") : ""],
+   ["Alert Level (" + st.alert + " mm)", stages.slice(0, U).some((s) => s >= 3) ? "reached, day " + (stages.findIndex((s) => s >= 3) + 1) : "not reached", ""],
+   ["Stage today", "Stage " + sNow, ""]].forEach(([k, v, u]) =>
+    box.append(AD.el("div", { class: "kpi" }, AD.el("div", { class: "k" }, k), AD.el("div", { class: "v" }, v), AD.el("div", { class: "u" }, u))));
+  const sc = ["rgba(0,0,0,0)", "rgba(108,143,179,0.18)", "rgba(210,155,46,0.22)", "rgba(224,122,46,0.25)", "rgba(208,80,58,0.25)", "rgba(183,28,28,0.3)"];
+  const shade = []; for (let d = 0; d < U; d++) if (stages[d] > 0) shade.push({ x0: d + 0.5, x1: d + 1.5, color: sc[stages[d]] });
+  const vl = LIFTS.map((l) => ({ x: l, color: "#c9c9c9", dash: [] }));
+  if (strutDay && strutDay <= U) vl.push({ x: strutDay, label: "extra strut", color: C.green, dash: [6, 3], row: 1 });
+  AD.plot("#c1", { title: "Ring R47 crown (shading: escalation stage; grey lines: excavation lifts)", height: 300, xlabel: "day", ylabel: "inward movement (mm)", xlim: [1, ND],
+    ylim: [-1, Math.max(st.wsl, peak) + 2], legend: "top", shade, vlines: vl,
+    series: [{ x: days.slice(0, U), y: shown, type: "points", size: 2.2, color: C.grey, label: "daily mean" }, { x: days.slice(0, U), y: kfState.slice(0, U).map((k) => k.d), color: C.blue, width: 2, label: "Kalman filter" }],
+    hlines: [{ y: st.alert, color: C.alert, label: "Alert Level" }, { y: st.wsl, color: C.suspend, label: "Work Suspension Level" }] });
+  const cur = RINGS.map((r, j) => obs[j][U - 1][0]);
+  AD.plot("#c2", { title: "Crown movement of every ring on day " + U, height: 210, ylabel: "mm", xlim: [39.4, 54.6], legend: false,
+    xticks: RINGS.map((r) => ({ v: r, label: "R" + r })), series: [{ x: RINGS, y: cur, type: "bar", colors: cur.map((v) => (v >= st.alert ? C.alert : C.blue)) }],
+    hlines: [{ y: st.alert, color: C.alert }] });
+  const log = [["1–35", "Baseline readings; detectors trained", ""]];
+  if (firstCusum) log.push(["" + firstCusum.d, "First CUSUM signal on a single prism (ring R" + firstCusum.r + ")", "Rings flagged by day " + U + ": " + [...cusumRings].sort().map((r) => "R" + r).join(", ")]);
+  if (firstRing) log.push(["" + firstRing.d, "Ring detector confirms a change of shape (ring R" + firstRing.r + ")", "Rings flagged: " + [...ringRings].sort().map((r) => "R" + r).join(", ")]);
+  if (stage2Day && stage2Day <= U) log.push(["" + stage2Day, "Stage 2: predicted Alert Level on R47", st.act ? "Readings every 15 minutes; engineer informed" : "Engineer informed, but no change to the works"]);
+  if (strutDay && strutDay <= U) log.push(["" + strutDay, "Extra temporary strut installed", "Response to later lifts much reduced"]);
+  const a = stages.slice(0, U).findIndex((s) => s >= 3); if (a >= 0) log.push(["" + (a + 1), "Alert Level reached on R47", "Notify as specified; review the works"]);
+  const w = stages.slice(0, U).findIndex((s) => s >= 5); if (w >= 0) log.push(["" + (w + 1), "Work Suspension Level reached on R47", "Stop the specified works"]);
+  LIFTS.filter((l) => l <= U).forEach((l, k) => log.push(["" + l, "Excavation lift to " + 2 * (k + 1) + " m", ""]));
+  log.sort((p, q2) => parseInt(p[0]) - parseInt(q2[0]));
+  AD.table("#log", ["Day", "Event", "Note"], log, { highlight: (i, r) => /Stage|Alert|Suspension/.test(r[1]) });
+}
+render(); window.addEventListener("resize", () => setTimeout(render, 100));
+
+</script>
+</body>
+</html>

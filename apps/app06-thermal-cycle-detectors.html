@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>App 6: Thermal Cycle and Detectors | AI for Deformation Monitoring</title>
+<meta name="description" content="See how a temperature input changes false alarms, and try an autoencoder.">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="top"><div class="wrap"><span class="book">AI for Deformation Monitoring &middot; companion apps</span><a class="home" href="../index.html">&larr; All apps</a></div></header>
+<main class="wrap">
+<h1>App 6: Thermal Cycle and Detectors</h1>
+<p class="sub">Chapter 6 &middot; <span class="badge exp">Experimental</span></p>
+<p>The tunnel ring of App 5 now swings with a daily thermal cycle. Fifteen problems are planted in the test period (days 31 to 60). Compare an Isolation Forest that sees only the displacements, the same detector given air temperature and hour of day, and a small autoencoder trained in your browser. Thresholds are set at the 99.5th percentile of scores on days 26 to 30.</p>
+<div class="layout">
+  <aside class="panel controls"><h3>Settings</h3><div id="controls"></div><p class="small">Press Run after changing settings. The autoencoder is trained in your browser and takes a few seconds.</p></aside>
+  <section class="out">
+    <div class="panel"><h2 style="margin-top:0">Events found and false alarms</h2><div id="status" class="busy">Training…</div><div id="tab" class="scroll"></div></div>
+    <div class="panel"><div class="chartbox"><canvas id="c1"></canvas></div><div class="chartbox"><canvas id="c2"></canvas></div></div>
+    <div class="panel note"><p><strong>What to notice.</strong> Without a temperature input, the detector flags the midday peak of the thermal swing as unusual. Giving it temperature and hour of day cuts the false alarms, often by as much as a more complex model does. Good inputs often matter more than a complex model. The autoencoder here is a small teaching version of the LSTM autoencoder in Chapter 6; deep learning in monitoring remains experimental.</p></div>
+  </section>
+</div>
+<footer>Copyright &copy; 2026 Yam Khoon Tor. All rights reserved. Companion app to <em>AI for Deformation Monitoring: Anomaly Detection, Trend Analysis and Early Warning for Surveyors and Engineers</em>. For readers’ personal study only. All data are simulated and illustrative; results will be similar to, but not always identical with, the figures in the book. This app is for education and does not replace professional judgement, project specifications or statutory requirements.</footer>
+</main>
+<script src="../assets/core.js"></script>
+<script src="../assets/plot.js"></script>
+<script src="../assets/ml.js"></script>
+<script>
+"use strict";
+const S = AD.stats, C = AD.colours, ML = AD.ml;
+const st = AD.controls("#controls", [
+  { key: "amp", label: "Thermal response", min: 0, max: 1.5, step: 0.05, value: 0.5, unit: "mm/°C" },
+  { key: "tswing", label: "Daily air temperature swing (±)", min: 1, max: 6, step: 0.5, value: 3, unit: "°C" },
+  { key: "noise", label: "Noise per reading", min: 0.3, max: 1.5, step: 0.05, value: 0.7, unit: "mm" },
+  { key: "epochs", label: "Autoencoder training passes", min: 5, max: 60, step: 5, value: 25 },
+  { key: "seed", label: "Random seed", min: 1, max: 50, step: 1, value: 7 },
+  { key: "run", type: "button", label: "Run", onClick: () => run() }], () => {});
+const P = 8, n = 60 * 48, TR = 25 * 48, VA = 30 * 48, theta = S.range(P).map((i) => i * 2 * Math.PI / P);
+let last = null;
+function simulate() {
+  const R = AD.rng(st.seed * 17), hour = S.range(n).map((i) => (i % 48) / 2), dayOff = S.range(60).map(() => R.normal(0, 0.8));
+  const temp = hour.map((h, i) => 30 + st.tswing * Math.sin(2 * Math.PI * (h - 9) / 24) + dayOff[Math.floor(i / 48)] + R.normal(0, 0.2));
+  const pat = S.range(3 * P).map((j) => (j % 3 === 0 ? 0.6 + 0.4 * Math.cos(theta[j / 3]) : 0));
+  const X = S.range(n).map((i) => { const cm = R.normal(0, 0.5); return S.range(3 * P).map((j) => R.normal(0, st.noise) + cm + st.amp * (temp[i] - 30) * pat[j]); });
+  const kinds = R.shuffle([...Array(5).fill("fault"), ...Array(5).fill("drift"), ...Array(5).fill("ring")]);
+  const slots = R.shuffle(S.range(Math.floor((n - VA - 100) / 88)).map((k) => VA + k * 88)).slice(0, 15).sort((a, b) => a - b), ev = [];
+  kinds.forEach((k, j) => { const s = slots[j];
+    if (k === "fault") { const c = R.int(3 * P), L = 1 + R.int(2), sz = (R.u() < 0.5 ? -1 : 1) * R.uniform(4, 8); for (let i = s; i < s + L; i++) X[i][c] += sz; ev.push({ type: k, s, e: s + L }); }
+    else if (k === "drift") { const p = R.int(P), L = 80; for (let i = 0; i < L; i++) X[s + i][3 * p] += 2 * i / (L - 1); ev.push({ type: k, s, e: s + L }); }
+    else { for (let i = s; i < s + 12; i++) for (let p = 0; p < P; p++) X[i][3 * p] += 1.2 * Math.cos(2 * theta[p]); ev.push({ type: k, s, e: s + 12 }); } });
+  return { X, temp, hour, ev };
+}
+function run() {
+  const stt = document.getElementById("status"); stt.className = "busy"; stt.textContent = "Training…";
+  setTimeout(() => {
+    const t0 = performance.now(), { X, temp, hour, ev } = simulate();
+    const F = X.map((r, i) => [...r, Math.sin(2 * Math.PI * hour[i] / 24), Math.cos(2 * Math.PI * hour[i] / 24), temp[i]]);
+    const thr = (sc) => { const t = S.quantile(sc.slice(TR, VA), 0.995); return sc.map((v) => v > t); };
+    const res = [];
+    let sc = ML.scaler(X.slice(0, TR)), Z = sc.t(X), iso = ML.isolationForest(Z.slice(0, TR), { trees: 150, seed: st.seed });
+    res.push({ name: "Isolation Forest, displacements only", score: Z.map(iso) });
+    sc = ML.scaler(F.slice(0, TR)); const ZF = sc.t(F); iso = ML.isolationForest(ZF.slice(0, TR), { trees: 150, seed: st.seed });
+    res.push({ name: "Isolation Forest + hour and temperature", score: ZF.map(iso) });
+    const ae = ML.autoencoder(ZF.slice(0, TR), { hidden: [16, 6, 16], epochs: st.epochs, outDims: 3 * P, seed: st.seed });
+    res.push({ name: "Autoencoder + hour and temperature", score: ZF.map(ae) });
+    res.forEach((r) => (r.flags = thr(r.score)));
+    last = { X, temp, ev, res, secs: (performance.now() - t0) / 1000 }; draw();
+  }, 30);
+}
+function draw() {
+  const { X, temp, ev, res, secs } = last, inEv = (i) => ev.some((e) => i >= e.s && i < e.e);
+  const quiet = S.range(n).filter((i) => i >= VA && !inEv(i)).length;
+  AD.table("#tab", ["Detector", "Faults (of 5)", "Drifts (of 5)", "Ring changes (of 5)", "False alarms per 1,000", "Share of false alarms at midday (10:00–16:00)"], res.map((r) => {
+    const f = { fault: 0, drift: 0, ring: 0 }; ev.forEach((e) => { if (r.flags.slice(e.s, e.e).some(Boolean)) f[e.type]++; });
+    const fa = S.range(n).filter((i) => i >= VA && r.flags[i] && !inEv(i)), mid = fa.filter((i) => (i % 48) >= 20 && (i % 48) < 32).length;
+    return [r.name, f.fault, f.drift, f.ring, (fa.length / quiet * 1000).toFixed(1), fa.length ? Math.round(100 * mid / fa.length) + " %" : "–"]; }));
+  const s = document.getElementById("status"); s.className = "small"; s.textContent = "Done in " + secs.toFixed(1) + " s. A share well above 25 % at midday means the detector is mistaking the thermal peak for an anomaly.";
+  const k = 4 * 48, h = S.range(k).map((i) => i / 2);
+  AD.plot("#c1", { title: "Four days of one prism (radial) and air temperature", height: 220, xlabel: "hour", legend: "top",
+    series: [{ x: h, y: X.slice(0, k).map((r) => r[0]), color: C.blue, width: 1, label: "prism P1, radial (mm)" }, { x: h, y: temp.slice(0, k).map((t) => t - 30), color: C.orange, width: 2, dash: [6, 4], label: "air temperature − 30 °C" }] });
+  const x = S.range(n - VA, VA).map((i) => i / 48);
+  const shade = ev.map((e) => ({ x0: e.s / 48, x1: Math.max(e.e, e.s + 3) / 48, color: "rgba(46,139,87,0.25)" }));
+  AD.plot("#c2", { title: "Flags in the test period (green bands: planted problems)", height: 210, xlabel: "day", ylim: [0.4, 3.6], shade, legend: "top",
+    xticks: S.range(7).map((k) => ({ v: 30 + 5 * k, label: String(30 + 5 * k) })),
+    series: res.map((r, j) => { const fx = x.filter((_, k) => r.flags[VA + k]); return { x: fx, y: fx.map(() => 3 - j), type: "points", size: 2.5, color: AD.series[j], label: ["IF displacements", "IF + temperature", "Autoencoder"][j] }; }) });
+}
+run(); window.addEventListener("resize", () => setTimeout(() => last && draw(), 100));
+
+</script>
+</body>
+</html>

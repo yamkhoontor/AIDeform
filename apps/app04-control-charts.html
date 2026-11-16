@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>App 4: Control Charts | AI for Deformation Monitoring</title>
+<meta name="description" content="Tune CUSUM, EWMA and a rate rule on twelve settlement points beside an excavation.">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="top"><div class="wrap"><span class="book">AI for Deformation Monitoring &middot; companion apps</span><a class="home" href="../index.html">&larr; All apps</a></div></header>
+<main class="wrap">
+<h1>App 4: Control Charts</h1>
+<p class="sub">Chapter 4 &middot; <span class="badge est">Established</span></p>
+<p>Twelve settlement points behind a retaining wall are read daily for 120 days; excavation starts on day 61. Tune the CUSUM and EWMA charts and the rate rule, and see how many days of notice they give before the Alert Level is reached, and how many false flags they raise on points that are not moving.</p>
+<div class="layout">
+  <aside class="panel controls"><h3>Settings</h3><div id="controls"></div></aside>
+  <section class="out">
+    <div class="panel"><div class="kpis" id="kpis"></div></div>
+    <div class="panel"><div class="chartbox"><canvas id="c1"></canvas></div><div class="chartbox"><canvas id="c2"></canvas></div><div class="chartbox"><canvas id="c3"></canvas></div></div>
+    <div class="panel"><h2 style="margin-top:0">All twelve points</h2><div id="tab" class="scroll"></div>
+      <p class="small">Signals are counted from day 61. "Notice" is the number of days between the CUSUM signal and the Alert Level. Points SP01, SP06 and SP08 to SP12 do not move, so any signal there is a false alarm. The baseline screen flags readings with a modified z-score above the limit.</p></div>
+    <div class="panel note"><p><strong>What to notice.</strong> A smaller CUSUM decision line or EWMA weight signals earlier but raises more false alarms on the quiet points. With the book's settings (k = 0.5, h = 5, λ = 0.1) SP03 signals about a month before its Alert Level, but over 60 days one or two quiet points may still raise a false flag. Change the random seed to see how this varies, and raise h to trade notice for fewer false alarms.</p></div>
+  </section>
+</div>
+<footer>Copyright &copy; 2026 Yam Khoon Tor. All rights reserved. Companion app to <em>AI for Deformation Monitoring: Anomaly Detection, Trend Analysis and Early Warning for Surveyors and Engineers</em>. For readers’ personal study only. All data are simulated and illustrative; results will be similar to, but not always identical with, the figures in the book. This app is for education and does not replace professional judgement, project specifications or statutory requirements.</footer>
+</main>
+<script src="../assets/core.js"></script>
+<script src="../assets/plot.js"></script>
+<script src="../assets/ml.js"></script>
+<script>
+"use strict";
+const S = AD.stats, C = AD.colours;
+const st = AD.controls("#controls", [
+  { key: "pt", type: "select", label: "Point to plot", value: "SP03", options: S.range(12, 1).map((k) => ({ value: "SP" + String(k).padStart(2, "0"), label: "SP" + String(k).padStart(2, "0") })) },
+  { key: "k", label: "CUSUM reference value k (σ)", min: 0, max: 1.5, step: 0.05, value: 0.5 },
+  { key: "h", label: "CUSUM decision line h (σ)", min: 1, max: 10, step: 0.5, value: 5 },
+  { key: "lam", label: "EWMA weight λ", min: 0.02, max: 0.5, step: 0.01, value: 0.1 },
+  { key: "L", label: "EWMA limit (σ multiples)", min: 1.5, max: 4, step: 0.1, value: 2.7 },
+  { key: "rate", label: "Rate rule (two days running)", min: 0.1, max: 2, step: 0.05, value: 0.5, unit: "mm/day" },
+  { key: "mad", label: "Baseline screen limit (modified z)", min: 2.5, max: 6, step: 0.1, value: 3.5 },
+  { key: "alert", label: "Alert Level", min: 5, max: 30, step: 1, value: 15, unit: "mm" },
+  { key: "noise", label: "Reading noise σ", min: 0.2, max: 1.5, step: 0.05, value: 0.6, unit: "mm" },
+  { key: "seed", label: "Random seed", min: 1, max: 50, step: 1, value: 5 }], render);
+const N = 120, START = 61, BASE = 60, days = S.range(N, 1);
+function simulate() {
+  const R = AD.rng(st.seed * 7919), pts = {};
+  for (let k = 1; k <= 12; k++) { const id = "SP" + String(k).padStart(2, "0");
+    pts[id] = days.map((d) => { let s = R.normal(0, st.noise);
+      if (id === "SP03" || id === "SP04") s -= 0.7 * Math.max(d - 65, 0) * Math.exp(-Math.max(d - 66, 0) / 60);
+      else if (id === "SP02" || id === "SP05") s -= 0.08 * Math.max(d - 75, 0);
+      if (id === "SP07" && (d === 25 || d === 26)) s -= 4;
+      return s; }); }
+  return pts;
+}
+function analyse(y) {
+  // baseline screen (detrended), statistics from clean baseline
+  const bt = days.slice(0, BASE), by = y.slice(0, BASE), f = AD.lin.polyfit(bt, by, 1);
+  const z = S.modz(by.map((v, i) => v - (f.x[0] + f.x[1] * bt[i]))); const flagged = bt.filter((_, i) => Math.abs(z[i]) > st.mad);
+  const clean = by.filter((_, i) => Math.abs(z[i]) <= st.mad), mu = S.mean(clean), sd = S.sd(clean);
+  const post = y.slice(START - 1), cs = AD.ml.cusumLower(post, mu, sd, st.k, st.h);
+  const ew = AD.ml.ewma(post, mu, st.lam), lim = st.L * sd * Math.sqrt(st.lam / (2 - st.lam)); const ewHit = ew.findIndex((v) => v < mu - lim);
+  // rate rule on cleaned record: 5-day least squares slope
+  const yc = y.map((v, i) => (flagged.includes(days[i]) ? NaN : v));
+  for (let i = 0; i < N; i++) if (!Number.isFinite(yc[i])) yc[i] = (yc[i - 1] + (Number.isFinite(y[i + 1]) ? y[i + 1] : yc[i - 1])) / 2;
+  const rate = days.map((_, i) => { if (i < 4) return NaN; const f5 = AD.lin.polyfit(days.slice(i - 4, i + 1), yc.slice(i - 4, i + 1), 1); return -f5.x[1]; });
+  let rateHit = null; for (let i = START; i < N; i++) if (rate[i] > st.rate && rate[i - 1] > st.rate) { rateHit = days[i]; break; }
+  const alertIdx = y.findIndex((v) => -v >= st.alert);
+  return { flagged, mu, sd, cs, ew, lim, cusumDay: cs.hit >= 0 ? START + cs.hit : null, ewmaDay: ewHit >= 0 ? START + ewHit : null, rate, rateHit,
+    alertDay: alertIdx >= 0 ? days[alertIdx] : null, settleAtCusum: cs.hit >= 0 ? -y[START - 1 + cs.hit] : null };
+}
+const MOVING = ["SP02", "SP03", "SP04", "SP05"];
+function render() {
+  const pts = simulate(), res = {}; for (const id in pts) res[id] = analyse(pts[id]);
+  const a = res[st.pt], y = pts[st.pt];
+  const falseC = Object.keys(res).filter((id) => !MOVING.includes(id) && res[id].cusumDay).length;
+  const falseE = Object.keys(res).filter((id) => !MOVING.includes(id) && res[id].ewmaDay).length;
+  const box = document.getElementById("kpis"); box.innerHTML = "";
+  [[st.pt + ": CUSUM signal", a.cusumDay ? "day " + a.cusumDay : "none", a.settleAtCusum !== null ? "settlement then " + a.settleAtCusum.toFixed(1) + " mm" : ""],
+   [st.pt + ": Alert Level reached", a.alertDay ? "day " + a.alertDay : "not reached", "level " + st.alert + " mm"],
+   ["Notice given", a.cusumDay && a.alertDay ? (a.alertDay - a.cusumDay) + " days" : "–", "CUSUM signal to Alert Level"],
+   ["False alarms on quiet points", falseC + " CUSUM, " + falseE + " EWMA", "of 8 quiet points"]].forEach(([k, v, u]) =>
+    box.append(AD.el("div", { class: "kpi" }, AD.el("div", { class: "k" }, k), AD.el("div", { class: "v" }, v), AD.el("div", { class: "u" }, u))));
+  const vl = [{ x: START, label: "excavation starts", color: "#888" }];
+  if (a.cusumDay) vl.push({ x: a.cusumDay, label: "CUSUM signal", color: C.blue, dash: [2, 2], row: 1 });
+  AD.plot("#c1", { title: st.pt + " settlement", height: 240, ylabel: "settlement (mm)", legend: "top", ylim: [Math.min(-1.5, ...y.map((v) => -v)) - 0.5, Math.max(st.alert + 2, ...y.map((v) => -v + 1))],
+    series: [{ x: days, y: y.map((v) => -v), color: C.blue, width: 1.2, label: "readings" },
+             { x: a.flagged, y: a.flagged.map((d) => -y[d - 1]), type: "points", hollow: true, size: 6, color: C.suspend, label: "baseline flags" }],
+    hlines: [{ y: st.alert, color: C.alert, label: "Alert Level " + st.alert + " mm" }], vlines: vl });
+  const pd = days.slice(START - 1);
+  AD.plot("#c2", { title: "CUSUM (downward)", height: 190, ylabel: "CUSUM", ylim: [0, Math.max(st.h * 3, 10)], xlim: [1, N], series: [{ x: pd, y: a.cs.s, color: C.orange }],
+    hlines: [{ y: st.h, color: "#666", label: "decision line h = " + st.h }], vlines: vl.slice(1) });
+  AD.plot("#c3", { title: "EWMA", height: 190, ylabel: "mm", xlabel: "day", xlim: [1, N], ylim: [-8, 2], series: [{ x: pd, y: a.ew.map((v) => v - a.mu), color: C.green }],
+    hlines: [{ y: -a.lim, color: "#666", label: "control limit" }] });
+  AD.table("#tab", ["Point", "Baseline flags", "CUSUM", "EWMA", "Rate rule", "Alert Level", "Notice"], Object.keys(res).map((id) => { const r = res[id];
+    return [id + (MOVING.includes(id) ? "" : " (quiet)"), r.flagged.length ? "day " + r.flagged.join(", ") : "–", r.cusumDay ? "day " + r.cusumDay : "–", r.ewmaDay ? "day " + r.ewmaDay : "–",
+      r.rateHit ? "day " + r.rateHit : "–", r.alertDay ? "day " + r.alertDay : "–", r.cusumDay && r.alertDay ? (r.alertDay - r.cusumDay) + " days" : "–"]; }),
+    { highlight: (i, r) => r[0] === st.pt || r[0] === st.pt + " (quiet)" });
+}
+render(); window.addEventListener("resize", () => setTimeout(render, 100));
+
+</script>
+</body>
+</html>

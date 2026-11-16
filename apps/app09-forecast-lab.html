@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>App 9: Forecast Lab | AI for Deformation Monitoring</title>
+<meta name="description" content="Compare forecasts and check whether their uncertainty bands are honest.">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="top"><div class="wrap"><span class="book">AI for Deformation Monitoring &middot; companion apps</span><a class="home" href="../index.html">&larr; All apps</a></div></header>
+<main class="wrap">
+<h1>App 9: Forecast Lab</h1>
+<p class="sub">Chapter 9 &middot; <span class="badge est">Established</span> <span class="badge early">Early adoption</span></p>
+<p>Convergence of a tunnel ring beneath an excavation is read every hour for 75 days, with a 2 m excavation lift every 7 days from day 20. Forecasts are made every 6 hours over the last 20 days, looking ahead by the horizon you choose. Compare a Kalman filter, an autoregressive time-series model and gradient boosting, and check how often each method's 95 % band really holds the outcome.</p>
+<div class="layout">
+  <aside class="panel controls"><h3>Settings</h3><div id="controls"></div><p class="small">Press Run after changing settings.</p></aside>
+  <section class="out">
+    <div class="panel"><h2 style="margin-top:0">Accuracy and honesty of the bands</h2><div id="status" class="busy">Computing…</div><div id="tab" class="scroll"></div>
+      <p class="small">Typical error is the root mean square of forecast minus outcome. Coverage is the share of outcomes inside the 95 % band; well below 95 % means the method is over-confident. The autoregressive model and gradient boosting use conformal bands, calibrated on forecasts made between day 45 and day 55.</p></div>
+    <div class="panel"><div class="chartbox"><canvas id="c1"></canvas></div><div class="chartbox"><canvas id="c2"></canvas></div></div>
+    <div class="panel note"><p><strong>What to notice.</strong> Errors grow with the horizon. The Kalman filter needs no training and is easy to explain. In the book's example the classical time-series model was the most accurate. Conformal bands are honest only when the calibration period resembles the test period, so always check the coverage. Now choose "More lifts in the test period": the excavation goes deeper than anything gradient boosting saw in training, and because a tree model cannot extrapolate, its error grows and its band stops being honest. Never trust a model beyond the conditions it has seen.</p></div>
+  </section>
+</div>
+<footer>Copyright &copy; 2026 Yam Khoon Tor. All rights reserved. Companion app to <em>AI for Deformation Monitoring: Anomaly Detection, Trend Analysis and Early Warning for Surveyors and Engineers</em>. For readers’ personal study only. All data are simulated and illustrative; results will be similar to, but not always identical with, the figures in the book. This app is for education and does not replace professional judgement, project specifications or statutory requirements.</footer>
+</main>
+<script src="../assets/core.js"></script>
+<script src="../assets/plot.js"></script>
+<script src="../assets/ml.js"></script>
+<script>
+"use strict";
+const S = AD.stats, C = AD.colours, ML = AD.ml;
+const st = AD.controls("#controls", [
+  { key: "H", label: "Forecast horizon", min: 6, max: 96, step: 6, value: 72, unit: "h", decimals: 0 },
+  { key: "noise", label: "Reading noise", min: 0.05, max: 0.6, step: 0.05, value: 0.25, unit: "mm" },
+  { key: "cyc", label: "Daily cycle (±)", min: 0, max: 1, step: 0.05, value: 0.3, unit: "mm" },
+  { key: "lifts", type: "select", label: "Excavation programme", value: "book", options: [{ value: "book", label: "Lifts every 7 days from day 20 (as in the book)" }, { value: "more", label: "More lifts in the test period" }] },
+  { key: "q", label: "Kalman agility (log10 process noise)", min: -9, max: -4, step: 0.5, value: -6.5 },
+  { key: "seed", label: "Random seed", min: 1, max: 50, step: 1, value: 10 },
+  { key: "run", type: "button", label: "Run", onClick: () => run() }], () => {});
+let last = null;
+function simulate() {
+  const R = AD.rng(st.seed * 7), n = 75 * 24, day = S.range(n).map((i) => i / 24);
+  const lifts = st.lifts === "book" ? S.range(7).map((k) => 20 + 7 * k) : [...S.range(5).map((k) => 20 + 7 * k), 55, 58, 61, 64, 67, 70];
+  const depth = day.map((d) => 2 * lifts.filter((l) => l <= d).length), target = depth.map((dp) => 0.06 * Math.pow(dp, 1.3));
+  const conv = new Array(n).fill(0); for (let i = 1; i < n; i++) conv[i] = conv[i - 1] + (target[i] - conv[i - 1]) / 48;
+  const y = conv.map((c, i) => c + st.cyc * Math.sin(2 * Math.PI * ((i % 24) - 14) / 24) + R.normal(0, st.noise));
+  return { n, day, depth, y };
+}
+function run() {
+  const s = document.getElementById("status"); s.className = "busy"; s.textContent = "Computing…";
+  setTimeout(() => {
+    const t0 = performance.now(), { n, day, depth, y } = simulate(), H = st.H, z = AD.dist.normPpf(0.975), q = Math.pow(10, st.q);
+    const origins = S.range(Math.floor((n - H - 55 * 24) / 6)).map((k) => 55 * 24 + 6 * k);
+    const calib = S.range(Math.floor((55 * 24 - H - 45 * 24) / 6)).map((k) => 45 * 24 + 6 * k);
+    // Kalman filter (constant velocity) run once over the record
+    const kf = ML.kalmanCV(y, { sigma: st.noise, q });
+    const kal = (i) => ML.kalmanAhead(kf[i], H, { q, sigma: st.noise });
+    // AR(24) on hourly differences, fitted by least squares on the 20 days before each origin
+    const P = 24, ar = (i) => { const w = []; for (let k = i - 20 * 24 + 1; k <= i; k++) w.push(y[k] - y[k - 1]);
+      const A = [], b = []; for (let k = P; k < w.length; k++) { A.push([1, ...S.range(P).map((j) => w[k - 1 - j])]); b.push(w[k]); }
+      const c = AD.lin.lsq(A, b).x, hist = w.slice(-P); let lvl = y[i];
+      for (let h = 0; h < H; h++) { const nx = c[0] + S.range(P).reduce((s2, j) => s2 + c[1 + j] * hist[hist.length - 1 - j], 0); hist.push(nx); lvl += nx; } return lvl; };
+    // gradient boosting: direct H-hour model of the change, inputs include the planned depth H hours ahead
+    const feat = (i) => [y[i], y[i] - y[i - 6], y[i] - y[i - 24], y[i] - y[i - 72], depth[i], depth[i + H], depth[i + H] - depth[i], (i + H) % 24];
+    const trIdx = S.range(45 * 24 - H - 72, 72), gb = ML.gradientBoosting(trIdx.map(feat), trIdx.map((i) => y[i + H] - y[i]), { rounds: 200, rate: 0.05, maxDepth: 3, minLeaf: 10, seed: st.seed });
+    const gbf = (i) => y[i] + gb.predict(feat(i));
+    const qhat = (errs) => S.quantile(errs, Math.min(1, Math.ceil((errs.length + 1) * 0.95) / errs.length));
+    const qa = qhat(calib.map((i) => Math.abs(ar(i) - y[i + H]))), qg = qhat(calib.map((i) => Math.abs(gbf(i) - y[i + H])));
+    const rows = origins.map((i) => { const k = kal(i), a = ar(i), g = gbf(i); return { i, t: (i + H) / 24, truth: y[i + H], k: k.m, kl: k.m - z * k.s, kh: k.m + z * k.s, a, al: a - qa, ah: a + qa, g, gl: g - qg, gh: g + qg }; });
+    last = { rows, day, y, depth, H, secs: (performance.now() - t0) / 1000 }; draw();
+  }, 30);
+}
+function draw() {
+  const { rows, day, y, depth, H, secs } = last;
+  const sc = (m, l, h) => { const e = rows.map((r) => r[m] - r.truth), cov = rows.filter((r) => r.truth >= r[l] && r.truth <= r[h]).length / rows.length;
+    return [Math.sqrt(S.mean(e.map((v) => v * v))).toFixed(2) + " mm", Math.round(cov * 100) + " %", S.mean(rows.map((r) => r[h] - r[l])).toFixed(2) + " mm"]; };
+  AD.table("#tab", ["Method", "Typical error at " + H + " h", "95 % band coverage", "Average band width"], [["Kalman filter (constant velocity)", ...sc("k", "kl", "kh")],
+    ["Autoregressive model, AR(24), conformal band", ...sc("a", "al", "ah")], ["Gradient boosting, conformal band", ...sc("g", "gl", "gh")]],
+    { highlight: (i, r) => parseInt(r[2]) < 90 });
+  const s = document.getElementById("status"); s.className = "small"; s.textContent = rows.length + " forecasts, done in " + secs.toFixed(1) + " s. Rows shaded orange have coverage below 90 %.";
+  const t = rows.map((r) => r.t);
+  AD.plot("#c1", { title: "Forecasts made " + H + " hours ahead, with 95 % bands", height: 300, xlabel: "day", ylabel: "convergence (mm)", legend: "top",
+    series: [{ x: t, y: rows.map((r) => r.gl), y2: rows.map((r) => r.gh), type: "band", color: C.blue, label: "boosting band" },
+      { x: t, y: rows.map((r) => r.kl), y2: rows.map((r) => r.kh), type: "band", color: C.orange, alpha: 0.12, label: "Kalman band" },
+      { x: t, y: rows.map((r) => r.truth), type: "points", size: 2.2, color: "#333", label: "outcome" },
+      { x: t, y: rows.map((r) => r.g), color: C.blue, width: 1.6, label: "boosting" }, { x: t, y: rows.map((r) => r.a), color: C.green, width: 1.2, label: "AR(24)" },
+      { x: t, y: rows.map((r) => r.k), color: C.orange, width: 1.2, dash: [5, 4], label: "Kalman" }] });
+  AD.plot("#c2", { title: "The whole record and the excavation programme", height: 200, xlabel: "day", legend: "top",
+    series: [{ x: day, y, color: C.grey, width: 0.6, label: "convergence (mm)" }, { x: day, y: depth.map((d) => d / 2), type: "step", color: C.gold, width: 1.8, label: "excavation depth ÷ 2 (m)" }],
+    shade: [{ x0: 45, x1: 55, color: "rgba(184,134,11,0.12)" }, { x0: 55 + H / 24, x1: 75, color: "rgba(31,90,150,0.10)" }] });
+}
+run(); window.addEventListener("resize", () => setTimeout(() => last && draw(), 100));
+
+</script>
+</body>
+</html>

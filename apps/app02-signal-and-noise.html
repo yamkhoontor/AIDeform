@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>App 2: Signal and Noise | AI for Deformation Monitoring</title>
+<meta name="description" content="Mix real movement, a thermal cycle and noise; find the smallest detectable change.">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="top"><div class="wrap"><span class="book">AI for Deformation Monitoring &middot; companion apps</span><a class="home" href="../index.html">&larr; All apps</a></div></header>
+<main class="wrap">
+<h1>App 2: Signal and Noise</h1>
+<p class="sub">Chapter 2 &middot; <span class="badge est">Established</span></p>
+<p>Every monitoring reading mixes three things: real movement, a daily thermal cycle and random noise. Set each one and see how easily the real movement can be seen. The second panel works out the smallest change you can detect between two readings.</p>
+<div class="layout">
+  <aside class="panel controls"><h3>Settings</h3><div id="controls"></div></aside>
+  <section class="out">
+    <div class="panel"><div class="kpis" id="kpis"></div></div>
+    <div class="panel"><div class="chartbox"><canvas id="c1"></canvas></div><div class="chartbox"><canvas id="c2"></canvas></div></div>
+    <div class="panel"><h2 style="margin-top:0">Smallest detectable change between two readings</h2>
+      <p class="small">For two readings each with standard deviation &sigma;, the difference has standard deviation &radic;2&nbsp;&sigma;. At 95 % confidence the smallest detectable change is about 2.8&nbsp;&sigma;.</p>
+      <div id="sdc" class="scroll"></div></div>
+    <div class="panel note"><p><strong>What to notice.</strong> Set the thermal swing larger than the daily settlement and the real movement disappears in the raw readings, yet a straight line fitted through many readings still finds the rate. That is why trends and statistics beat reading-by-reading comparison.</p></div>
+  </section>
+</div>
+<footer>Copyright &copy; 2026 Yam Khoon Tor. All rights reserved. Companion app to <em>AI for Deformation Monitoring: Anomaly Detection, Trend Analysis and Early Warning for Surveyors and Engineers</em>. For readers’ personal study only. All data are simulated and illustrative; results will be similar to, but not always identical with, the figures in the book. This app is for education and does not replace professional judgement, project specifications or statutory requirements.</footer>
+</main>
+<script src="../assets/core.js"></script>
+<script src="../assets/plot.js"></script>
+<script src="../assets/ml.js"></script>
+<script>
+"use strict";
+const st = AD.controls("#controls", [
+  { key: "days", label: "Length of record", min: 5, max: 90, step: 1, value: 30, unit: "days" },
+  { key: "rate", label: "Real settlement rate", min: 0, max: 0.5, step: 0.01, value: 0.15, unit: "mm/day" },
+  { key: "amp", label: "Daily thermal swing (±)", min: 0, max: 4, step: 0.1, value: 1.2, unit: "mm" },
+  { key: "noise", label: "Noise of one reading, σ", min: 0.1, max: 3, step: 0.1, value: 0.6, unit: "mm" },
+  { key: "every", label: "Reading interval", min: 15, max: 240, step: 15, value: 30, unit: "min", decimals: 0 },
+  { key: "conf", label: "Confidence level", type: "select", value: "0.95", options: [{ value: "0.9", label: "90 %" }, { value: "0.95", label: "95 %" }, { value: "0.99", label: "99 %" }] },
+  { key: "seed", label: "Random seed", min: 1, max: 50, step: 1, value: 1 },
+], render);
+function render() {
+  const R = AD.rng(st.seed), perDay = 1440 / st.every, n = Math.round(st.days * perDay);
+  const t = AD.stats.range(n).map((i) => i / perDay);
+  const s = t.map((d) => -st.rate * d), c = t.map((d) => st.amp * Math.sin(2 * Math.PI * (d - 0.375))), e = t.map(() => R.normal(0, st.noise));
+  const y = t.map((_, i) => s[i] + c[i] + e[i]);
+  const fit = AD.lin.polyfit(t, y, 1), v = fit.x[1], sv = Math.sqrt(fit.cov[1][1]);
+  const z = AD.dist.normPpf(0.5 + parseFloat(st.conf) / 2), sdc = z * Math.SQRT2 * st.noise;
+  const kpis = [["Real movement over the record", (-st.rate * st.days).toFixed(1), "mm"], ["Fitted rate (true " + (-st.rate).toFixed(2) + ")", v.toFixed(3) + " ± " + sv.toFixed(3), "mm/day"],
+    ["Smallest change, two readings", sdc.toFixed(1), "mm"], ["Readings in the record", n.toLocaleString(), ""]];
+  const box = document.getElementById("kpis"); box.innerHTML = "";
+  kpis.forEach(([k, val, u]) => box.append(AD.el("div", { class: "kpi" }, AD.el("div", { class: "k" }, k), AD.el("div", { class: "v" }, val), AD.el("div", { class: "u" }, u))));
+  AD.plot("#c1", { title: "What we observe, d(t)", height: 260, ylabel: "mm", xlabel: "day", legend: "top",
+    series: [{ x: t, y, color: AD.colours.grey, width: 0.8, label: "readings" }, { x: t, y: t.map((d) => fit.x[0] + v * d), color: AD.colours.orange, width: 2, label: "fitted trend" }] });
+  AD.plot("#c2", { title: "The three parts", height: 260, ylabel: "mm", xlabel: "day", legend: "top",
+    series: [{ x: t, y: e, color: AD.colours.faint, width: 0.6, label: "noise e(t)" }, { x: t, y: c, color: AD.colours.green, width: 1.2, label: "thermal cycle c(t)" }, { x: t, y: s, color: AD.colours.blue, width: 2.2, label: "real movement s(t)" }] });
+  const sig = [0.5, 1, 1.5, 2, st.noise].filter((v, i, a) => a.indexOf(v) === i).sort((a, b) => a - b);
+  const zz = (p) => AD.dist.normPpf(0.5 + p / 2) * Math.SQRT2;
+  AD.table("#sdc", ["Precision of one reading, σ (mm)", "Detectable at 90 %", "at 95 %", "at 99 %"],
+    sig.map((s) => [s.toFixed(1), (zz(0.9) * s).toFixed(1) + " mm", (zz(0.95) * s).toFixed(1) + " mm", (zz(0.99) * s).toFixed(1) + " mm"]),
+    { highlight: (i, r) => parseFloat(r[0]) === st.noise });
+}
+render(); window.addEventListener("resize", () => setTimeout(render, 100));
+
+</script>
+</body>
+</html>

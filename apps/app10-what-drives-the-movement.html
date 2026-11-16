@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>App 10: What Drives the Movement? | AI for Deformation Monitoring</title>
+<meta name="description" content="Set the true causes and see whether regression and machine learning recover them.">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="top"><div class="wrap"><span class="book">AI for Deformation Monitoring &middot; companion apps</span><a class="home" href="../index.html">&larr; All apps</a></div></header>
+<main class="wrap">
+<h1>App 10: What Drives the Movement?</h1>
+<p class="sub">Chapter 10 &middot; <span class="badge est">Established</span> <span class="badge early">Early adoption</span></p>
+<p>An inclinometer in a diaphragm wall reports the maximum deflection every hour for 100 days. You set how strongly each cause really acts: excavation depth, groundwater drawdown, temperature and rainfall. Then see whether a regression with significance tests, and a gradient boosting model questioned by permutation importance and partial dependence, can recover what you set.</p>
+<div class="layout">
+  <aside class="panel controls"><h3>True effects (you set them)</h3><div id="controls"></div><p class="small">Press Run after changing settings.</p></aside>
+  <section class="out">
+    <div class="panel"><h2 style="margin-top:0">Regression on likely causes</h2><div id="status" class="busy">Computing…</div><div id="reg" class="scroll"></div>
+      <p class="small">Each effect is estimated by least squares with its standard deviation and tested at 95 %. VIF (variance inflation factor) above about 10 means the cause moves together with another one, so their separate effects cannot be told apart. Depth and depth below 8 m are linked by design, so their VIFs are raised, but with this much data both are still well determined.</p></div>
+    <div class="panel grid2"><div><h2 style="margin-top:0">Permutation importance</h2><div id="imp" class="scroll"></div><p class="small">How much worse the gradient boosting model gets when one input is shuffled, as a share of the total.</p></div><div class="chartbox"><canvas id="c2"></canvas></div></div>
+    <div class="panel"><div class="chartbox"><canvas id="c3"></canvas></div></div>
+    <div class="panel note"><p><strong>What to notice.</strong> Tick "use both standpipes" and the two groundwater readings move together: their VIFs soar and their separate effects become meaningless. Set rainfall to zero and both methods rank it last. When the regression and the machine learning model agree, the conclusion is stronger; correlation is still only a lead, to be checked against the construction record.</p></div>
+  </section>
+</div>
+<footer>Copyright &copy; 2026 Yam Khoon Tor. All rights reserved. Companion app to <em>AI for Deformation Monitoring: Anomaly Detection, Trend Analysis and Early Warning for Surveyors and Engineers</em>. For readers’ personal study only. All data are simulated and illustrative; results will be similar to, but not always identical with, the figures in the book. This app is for education and does not replace professional judgement, project specifications or statutory requirements.</footer>
+</main>
+<script src="../assets/core.js"></script>
+<script src="../assets/plot.js"></script>
+<script src="../assets/ml.js"></script>
+<script>
+"use strict";
+const S = AD.stats, C = AD.colours, ML = AD.ml;
+const st = AD.controls("#controls", [
+  { key: "d1", label: "Deflection per metre of depth, to 8 m", min: 0, max: 3, step: 0.1, value: 1.2, unit: "mm/m" },
+  { key: "d2", label: "Extra per metre below 8 m", min: 0, max: 3, step: 0.1, value: 1.2, unit: "mm/m" },
+  { key: "gw", label: "Groundwater effect", min: 0, max: 4, step: 0.05, value: 1.9, unit: "mm per m of drawdown" },
+  { key: "tp", label: "Temperature effect", min: 0, max: 0.5, step: 0.01, value: 0.08, unit: "mm/°C" },
+  { key: "rain", label: "Rainfall effect", min: 0, max: 0.1, step: 0.005, value: 0, unit: "mm per mm", decimals: 3 },
+  { key: "noise", label: "Reading noise", min: 0.1, max: 2, step: 0.1, value: 0.6, unit: "mm" },
+  { key: "both", type: "check", label: "Use both standpipes in the regression", value: false },
+  { key: "seed", label: "Random seed", min: 1, max: 50, step: 1, value: 11 },
+  { key: "run", type: "button", label: "Run", onClick: () => run() }], () => {});
+let last = null;
+const NAMES = ["depth (m)", "depth below 8 m (m)", "drawdown, standpipe 1 (m)", "drawdown, standpipe 2 (m)", "temperature (°C)", "rain, last 24 h (mm)", "days since strut preload"];
+function simulate() {
+  const R = AD.rng(st.seed * 3), n = 100 * 24, day = S.range(n).map((i) => i / 24), lifts = S.range(9).map((k) => 10 + 8 * k);
+  const depth = day.map((d) => 2 * lifts.filter((l) => l <= d).length), pre = lifts.slice(1).map((l) => l + 3);
+  const since = day.map((d) => Math.min(30, Math.min(...pre.filter((p) => d >= p).map((p) => d - p), 99)));
+  const rain = day.map(() => (R.u() < 0.04 ? -Math.log(R.u() * R.u()) * 4 : 0)), rain24 = rain.map((_, i) => S.sum(rain.slice(Math.max(0, i - 23), i + 1)));
+  const pump = S.range(Math.ceil(n / 120)).map(() => R.uniform(0, 1.5)), gw1 = new Array(n).fill(0);
+  for (let i = 1; i < n; i++) gw1[i] = gw1[i - 1] + (0.12 * depth[i] + pump[Math.floor(i / 120)] - gw1[i - 1]) / 48 - 0.01 * rain[i];
+  const gw2 = gw1.map((g) => 0.8 * g + R.normal(0, 0.05)), temp = S.range(n).map((i) => 29 + 3 * Math.sin(2 * Math.PI * ((i % 24) - 9) / 24) + R.normal(0, 0.5));
+  const below = depth.map((d) => Math.max(d - 8, 0));
+  const defl = S.range(n).map((i) => st.d1 * Math.min(depth[i], 8) + (st.d1 + st.d2) * below[i] - 1.5 * Math.exp(-since[i] / 1.5) + st.gw * gw1[i] + st.tp * (temp[i] - 29) + st.rain * rain24[i] + R.normal(0, st.noise));
+  const X = S.range(n).map((i) => [depth[i], below[i], gw1[i], gw2[i], temp[i], rain24[i], since[i]]);
+  return { n, X, defl };
+}
+function run() {
+  const s = document.getElementById("status"); s.className = "busy"; s.textContent = "Computing…";
+  setTimeout(() => {
+    const t0 = performance.now(), { n, X, defl } = simulate();
+    // regression (true model uses depth, depth below 8 m, standpipe 1, temperature, rain)
+    const cols = st.both ? [0, 1, 2, 3, 4, 5] : [0, 1, 2, 4, 5];
+    const A = X.map((r) => [1, ...cols.map((c) => r[c])]), f = AD.lin.lsq(A, defl), tcrit = AD.dist.tPpf(0.975, f.dof);
+    const vif = cols.map((c, k) => { const others = cols.filter((o) => o !== c), Ao = X.map((r) => [1, ...others.map((o) => r[o])]), y = X.map((r) => r[c]);
+      const g = AD.lin.lsq(Ao, y), m = S.mean(y), r2 = 1 - S.sum(g.v.map((v) => v * v)) / S.sum(y.map((v) => (v - m) ** 2)); return 1 / Math.max(1e-9, 1 - r2); });
+    const truth = { 0: st.d1, 1: st.d2, 2: st.gw, 3: 0, 4: st.tp, 5: st.rain };
+    const reg = cols.map((c, k) => { const b = f.x[k + 1], sd = Math.sqrt(f.cov[k + 1][k + 1]), t = b / sd;
+      return [NAMES[c], truth[c].toFixed(3), b.toFixed(3), sd.toFixed(3), t.toFixed(1), Math.abs(t) > tcrit ? "yes" : "no", vif[k].toFixed(1)]; });
+    // gradient boosting on days 1-75, tested on days 76-100
+    const feats = [0, 6, 2, 3, 4, 5], Xf = X.map((r) => feats.map((c) => r[c])), split = 75 * 24;
+    const R = AD.rng(st.seed), trI = R.shuffle(S.range(split)).slice(0, 1500).sort((a, b) => a - b);
+    const gb = ML.gradientBoosting(trI.map((i) => Xf[i]), trI.map((i) => defl[i]), { rounds: 150, rate: 0.08, maxDepth: 3, minLeaf: 10, seed: st.seed });
+    const te = S.range(n - split, split), rmse = Math.sqrt(S.mean(te.map((i) => (gb.predict(Xf[i]) - defl[i]) ** 2)));
+    // permutation importance on 500 training rows
+    const sub = R.shuffle(S.range(split)).slice(0, 500), base = S.mean(sub.map((i) => (gb.predict(Xf[i]) - defl[i]) ** 2));
+    const imp = feats.map((_, j) => { const perm = R.shuffle(sub.map((i) => Xf[i][j]));
+      return S.mean(sub.map((i, k) => { const x = Xf[i].slice(); x[j] = perm[k]; return (gb.predict(x) - defl[i]) ** 2; })) - base; });
+    // partial dependence on depth (0 to 16 m), averaged over 200 rows
+    const pdRows = sub.slice(0, 200), grid = S.range(17), pd = grid.map((g) => S.mean(pdRows.map((i) => { const x = Xf[i].slice(); x[0] = g; return gb.predict(x); })));
+    last = { reg, rmse, imp, feats, grid, pd, secs: (performance.now() - t0) / 1000 }; draw();
+  }, 30);
+}
+function draw() {
+  const { reg, rmse, imp, feats, grid, pd, secs } = last;
+  AD.table("#reg", ["Cause", "True effect", "Estimated", "Std dev", "t", "Significant?", "VIF"], reg, { highlight: (i, r) => parseFloat(r[6]) > 10 });
+  const s = document.getElementById("status"); s.className = "small"; s.textContent = "Gradient boosting test error (days 76–100): " + rmse.toFixed(2) + " mm. Done in " + secs.toFixed(1) + " s.";
+  const order = S.range(feats.length).sort((a, b) => imp[b] - imp[a]);
+  const lab = ["excavation depth", "days since strut preload", "standpipe 1", "standpipe 2", "temperature", "rain, last 24 h"], tot = S.sum(imp.map((v) => Math.max(0, v))) || 1;
+  AD.table("#imp", ["Rank", "Input", "Share of importance"], order.map((j, k) => [k + 1, lab[j], (100 * Math.max(0, imp[j]) / tot).toFixed(imp[j] / tot < 0.01 ? 2 : 1) + " %"]), { highlight: (i) => i === 0 });
+  AD.plot("#c2", { title: "Partial dependence on excavation depth", height: 260, xlabel: "excavation depth (m)", ylabel: "added deflection (mm)", legend: false,
+    series: [{ x: grid, y: pd.map((v) => v - pd[0]), color: C.blue, width: 2 }, { x: grid, y: pd.map((v) => v - pd[0]), type: "points", size: 3, color: C.blue }],
+    vlines: [{ x: 8, label: "8 m", color: "#888" }] });
+  const est = reg.map((r) => parseFloat(r[2])), tru = reg.map((r) => parseFloat(r[1])), sd = reg.map((r) => parseFloat(r[3]));
+  AD.plot("#c3", { title: "True and estimated effects (bars: estimate ± 2 standard deviations)", height: 240, legend: "top", xlim: [-0.6, reg.length - 0.4],
+    xticks: reg.map((r, k) => ({ v: k, label: r[0].split(" (")[0].replace("drawdown, ", "") })),
+    series: [{ x: S.range(reg.length), y: tru, type: "points", size: 6, hollow: true, color: C.orange, label: "true effect" },
+      { x: S.range(reg.length), y: est, type: "points", size: 4, color: C.blue, label: "estimate" },
+      ...reg.map((_, k) => ({ x: [k, k], y: [est[k] - 2 * sd[k], est[k] + 2 * sd[k]], color: C.blue, width: 2 }))] });
+}
+run(); window.addEventListener("resize", () => setTimeout(() => last && draw(), 100));
+
+</script>
+</body>
+</html>

@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>App 11: Warning Calculator | AI for Deformation Monitoring</title>
+<meta name="description" content="Work out time to threshold, probability of exceedance and the escalation stage.">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="top"><div class="wrap"><span class="book">AI for Deformation Monitoring &middot; companion apps</span><a class="home" href="../index.html">&larr; All apps</a></div></header>
+<main class="wrap">
+<h1>App 11: Warning Calculator</h1>
+<p class="sub">Chapter 11 &middot; <span class="badge est">Established</span> <span class="badge early">Early adoption</span></p>
+<p>Enter where a point is, how fast it is moving and how uncertain those figures are. The calculator works out the time until each trigger level is reached, the chance of reaching the Alert Level within the warning horizon, and the escalation stage of Chapter 11. The defaults are the worked example of Section 11.5 (point SP04). A second panel tries the inverse-velocity method on an accelerating slope.</p>
+<div class="layout">
+  <aside class="panel controls"><h3>Inputs</h3><div id="controls"></div></aside>
+  <section class="out">
+    <div class="panel"><div class="kpis" id="kpis"></div><p id="stage" style="margin:12px 0 0"></p></div>
+    <div class="panel grid2"><div class="chartbox"><canvas id="c1"></canvas></div><div class="chartbox"><canvas id="c2"></canvas></div></div>
+    <div class="panel"><h2 style="margin-top:0">Inverse-velocity method for accelerating movement</h2><div class="tool"><div id="ctl2"></div><div><div class="kpis" id="k2"></div><div class="chartbox"><canvas id="c3"></canvas></div></div></div>
+      <p class="small">For slopes and ground that accelerate towards failure, one divided by the velocity often falls in a straight line towards zero. Extending the line fitted to recent readings to zero gives an estimate of the failure time (Fukuzono, 1985).</p></div>
+    <div class="panel note"><p><strong>Remember.</strong> A predicted exceedance is advance notice, not the formal trigger. Trigger levels come from the design and the approving authority, and a competent person reviews every warning before anyone acts.</p></div>
+  </section>
+</div>
+<style>.tool{display:grid;grid-template-columns:230px 1fr;gap:16px}@media(max-width:820px){.tool{grid-template-columns:1fr}}</style>
+<footer>Copyright &copy; 2026 Yam Khoon Tor. All rights reserved. Companion app to <em>AI for Deformation Monitoring: Anomaly Detection, Trend Analysis and Early Warning for Surveyors and Engineers</em>. For readers’ personal study only. All data are simulated and illustrative; results will be similar to, but not always identical with, the figures in the book. This app is for education and does not replace professional judgement, project specifications or statutory requirements.</footer>
+</main>
+<script src="../assets/core.js"></script>
+<script src="../assets/plot.js"></script>
+<script src="../assets/ml.js"></script>
+<script>
+"use strict";
+const S = AD.stats, C = AD.colours, D = AD.dist;
+const st = AD.controls("#controls", [
+  { key: "d0", label: "Current movement", min: 0, max: 30, step: 0.1, value: 11.2, unit: "mm" },
+  { key: "v", label: "Velocity", min: -1, max: 3, step: 0.05, value: 0.9, unit: "mm/day" },
+  { key: "sd0", label: "Std dev of current movement", min: 0.05, max: 2, step: 0.05, value: 0.4, unit: "mm" },
+  { key: "sdv", label: "Std dev of velocity", min: 0.01, max: 0.5, step: 0.01, value: 0.08, unit: "mm/day" },
+  { key: "alert", label: "Alert Level", min: 1, max: 40, step: 0.5, value: 15, unit: "mm" },
+  { key: "wsl", label: "Work Suspension Level", min: 2, max: 60, step: 0.5, value: 25, unit: "mm" },
+  { key: "hz", label: "Warning horizon", min: 12, max: 168, step: 12, value: 72, unit: "h", decimals: 0 },
+  { key: "own", type: "check", label: "Use a forecast from another model (below)", value: true },
+  { key: "fm", label: "Forecast at the horizon", min: 0, max: 40, step: 0.1, value: 14.1, unit: "mm" },
+  { key: "fs", label: "Forecast std dev", min: 0.1, max: 3, step: 0.05, value: 0.8, unit: "mm" },
+  { key: "pw", label: "Warning probability agreed with client", min: 5, max: 90, step: 5, value: 30, unit: "%", decimals: 0 },
+  { key: "anom", type: "check", label: "A statistical anomaly is open on this point", value: false }], render);
+const STAGES = [["0", "Normal monitoring", "Continue the specified readings."], ["1", "Statistical anomaly", "Check the instrument and re-read. Surveyor."],
+  ["2", "Predicted Alert Level", "Read more often; inform the engineer. Monitoring manager."], ["3", "Alert Level confirmed", "Notify as specified; review the works. Engineer, contractor."],
+  ["4", "Predicted Work Suspension Level", "Prepare the contingency plan; consider pausing works. Engineer, owner."], ["5", "Work Suspension Level confirmed", "Stop the specified works; follow the contingency plan. All parties."]];
+function render() {
+  const days = st.hz / 24;
+  const ttl = (L) => { if (st.d0 >= L) return { t: 0, s: 0 }; if (st.v <= 0) return { t: Infinity, s: NaN };
+    const t = (L - st.d0) / st.v, s = Math.sqrt(st.sd0 ** 2 / st.v ** 2 + (L - st.d0) ** 2 / st.v ** 4 * st.sdv ** 2); return { t, s }; };
+  const ta = ttl(st.alert), tw = ttl(st.wsl);
+  const fm = st.own ? st.fm : st.d0 + st.v * days, fs = st.own ? st.fs : Math.sqrt(st.sd0 ** 2 + (days * st.sdv) ** 2);
+  const pA = 1 - D.normCdf((st.alert - fm) / fs), pW = 1 - D.normCdf((st.wsl - fm) / fs), pw = st.pw / 100;
+  let stage = 0; const steady = ta.t < 7;
+  if (st.anom) stage = 1;
+  if (pA >= pw || steady) stage = 2;
+  if (st.d0 >= st.alert) stage = 3;
+  if (pW >= pw) stage = 4;
+  if (st.d0 >= st.wsl) stage = 5;
+  const fmtT = (o) => (o.t === 0 ? "already reached" : !Number.isFinite(o.t) ? "not approaching" : o.t.toFixed(1) + " ± " + o.s.toFixed(1) + " days");
+  const box = document.getElementById("kpis"); box.innerHTML = "";
+  [["Time to Alert Level", fmtT(ta), Number.isFinite(ta.t) && ta.t > 0 ? "cautious estimate " + Math.max(0, ta.t - 2 * ta.s).toFixed(1) + " days" : ""],
+   ["Time to Work Suspension Level", fmtT(tw), ""],
+   ["Chance of Alert Level within " + st.hz + " h", Math.round(pA * 100) + " %", "forecast " + fm.toFixed(1) + " ± " + fs.toFixed(1) + " mm"],
+   ["Chance of Work Suspension Level", (pW * 100 < 1 ? "< 1" : Math.round(pW * 100)) + " %", "within " + st.hz + " h"]].forEach(([k, v, u]) =>
+    box.append(AD.el("div", { class: "kpi" }, AD.el("div", { class: "k" }, k), AD.el("div", { class: "v" }, v), AD.el("div", { class: "u" }, u))));
+  const why = stage === 2 && pA < pw ? " The probability (" + Math.round(pA * 100) + " %) is below the agreed " + st.pw + " %, but the point will reach its Alert Level in under a week at the present rate, so stage 2 is entered as a precaution." : "";
+  const sEl = document.getElementById("stage"); sEl.innerHTML = "";
+  sEl.append(AD.el("span", { class: "stage s" + stage }, "Stage " + STAGES[stage][0] + ": " + STAGES[stage][1]), " ", STAGES[stage][2] + why);
+  const tt = S.range(81).map((k) => -6 + k * 0.2), past = tt.filter((t) => t <= 0), fut = tt.filter((t) => t >= 0);
+  const sdAt = (t) => Math.sqrt(st.sd0 ** 2 + (t * st.sdv) ** 2);
+  const yTop = Math.max(st.wsl, st.d0 + st.v * 10) * 1.12 + 1;
+  AD.plot("#c1", { title: "Projection at the present rate", height: 260, xlabel: "days from now", ylabel: "movement (mm)", legend: false, ylim: [Math.min(0, st.d0 - 6 * Math.max(st.v, 0)), yTop],
+    series: [{ x: fut, y: fut.map((t) => st.d0 + st.v * t - 2 * sdAt(t)), y2: fut.map((t) => st.d0 + st.v * t + 2 * sdAt(t)), type: "band", color: C.blue },
+      { x: past, y: past.map((t) => st.d0 + st.v * t), color: C.grey, width: 2 }, { x: fut, y: fut.map((t) => st.d0 + st.v * t), color: C.blue, width: 2, dash: [6, 4] }],
+    hlines: [{ y: st.alert, color: C.alert, label: "Alert Level" }, { y: st.wsl, color: C.suspend, label: "Work Suspension Level" }],
+    vlines: Number.isFinite(ta.t) && ta.t > 0 && ta.t < 10 ? [{ x: ta.t, label: ta.t.toFixed(1) + " days", color: "#777", row: 1 }] : [] });
+  const xs = S.range(201).map((k) => fm - 4 * fs + k * 8 * fs / 200), tail = xs.filter((x) => x >= st.alert);
+  AD.plot("#c2", { title: "Forecast at " + st.hz + " h", height: 260, xlabel: "movement (mm)", legend: false,
+    series: [{ x: tail, y: tail.map(() => 0), y2: tail.map((x) => D.normPdf(x, fm, fs)), type: "band", color: C.alert, alpha: 0.5 }, { x: xs, y: xs.map((x) => D.normPdf(x, fm, fs)), color: C.blue, width: 2 }],
+    vlines: [{ x: st.alert, label: "Alert Level", color: C.alert, align: st.alert > fm ? "left" : "right" }],
+    notes: [{ x: fm - 3.8 * fs, y: D.normPdf(fm, fm, fs) * 0.9, text: Math.round(pA * 100) + " % beyond the Alert Level", color: C.alert }] });
+}
+// inverse velocity
+const s2 = AD.controls("#ctl2", [
+  { key: "tf", label: "True failure time", min: 25, max: 80, step: 1, value: 40, unit: "day" },
+  { key: "now", label: "Today", min: 15, max: 79, step: 1, value: 36, unit: "day" },
+  { key: "fit", label: "Days used for the fit", min: 4, max: 30, step: 1, value: 16 },
+  { key: "nz", label: "Scatter in velocity", min: 0, max: 30, step: 1, value: 8, unit: "%" },
+  { key: "seed", label: "Random seed", min: 1, max: 50, step: 1, value: 12 }], drawIV);
+function drawIV() {
+  const R = AD.rng(s2.seed), now = Math.min(s2.now, s2.tf - 1), t = S.range(Math.floor(now * 2) + 1).map((k) => k / 2);
+  const iv = t.map((d) => 1 / ((2 / (s2.tf - d)) * (1 + R.normal(0, s2.nz / 100))));
+  const use = t.map((d, i) => i).filter((i) => t[i] >= now - s2.fit), f = AD.lin.polyfit(use.map((i) => t[i]), use.map((i) => iv[i]), 1), tp = -f.x[0] / f.x[1];
+  const box = document.getElementById("k2"); box.innerHTML = "";
+  [["Predicted failure time", Number.isFinite(tp) && f.x[1] < 0 ? "day " + tp.toFixed(1) : "no trend", "true: day " + s2.tf], ["Warning given", Number.isFinite(tp) && f.x[1] < 0 ? (tp - now).toFixed(1) + " days ahead" : "–", "from day " + now]].forEach(([k, v, u]) =>
+    box.append(AD.el("div", { class: "kpi" }, AD.el("div", { class: "k" }, k), AD.el("div", { class: "v" }, v), AD.el("div", { class: "u" }, u))));
+  const xl = [0, Math.max(s2.tf, tp > 0 && tp < 200 ? tp : s2.tf) + 3], tl = [now - s2.fit, Math.max(now, Math.min(tp, xl[1]))];
+  AD.plot("#c3", { height: 240, xlabel: "day", ylabel: "1 / velocity (day/mm)", xlim: xl, legend: "top",
+    series: [{ x: t, y: iv, type: "points", size: 2.5, color: C.grey, label: "1 / velocity" }, { x: tl, y: tl.map((x) => f.x[0] + f.x[1] * x), color: C.orange, width: 2, label: "fitted line" }],
+    hlines: [{ y: 0, color: "#777", dash: [] }], vlines: [{ x: s2.tf, label: "true failure", color: C.suspend }, { x: now, label: "today", color: "#888", align: "right" }] });
+}
+render(); drawIV(); window.addEventListener("resize", () => setTimeout(() => { render(); drawIV(); }, 100));
+
+</script>
+</body>
+</html>

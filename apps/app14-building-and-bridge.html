@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>App 14: Building and Bridge | AI for Deformation Monitoring</title>
+<meta name="description" content="See why removing the thermal effect first finds real movement sooner, with fewer false alarms.">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="top"><div class="wrap"><span class="book">AI for Deformation Monitoring &middot; companion apps</span><a class="home" href="../index.html">&larr; All apps</a></div></header>
+<main class="wrap">
+<h1>App 14: Building and Bridge</h1>
+<p class="sub">Chapter 14 &middot; <span class="badge est">Established</span> <span class="badge early">Early adoption</span></p>
+<p>Two short case studies from Chapter 14. A 40-storey tower leans with the sun every day while a slow lean develops beneath it; a bridge deck expands and contracts with temperature while a bearing sticks and then slips. Change the size of the thermal swing and of the real movement, and compare an alarm set on the raw readings with one set on the residual after the temperature effect is removed.</p>
+<div class="layout">
+  <aside class="panel controls"><h3>Settings</h3><div id="controls"></div></aside>
+  <section class="out">
+    <div class="panel"><div class="kpis" id="kpis"></div></div>
+    <div class="panel"><div class="chartbox"><canvas id="c1"></canvas></div><div class="chartbox"><canvas id="c2"></canvas></div></div>
+    <div class="panel"><h2 style="margin-top:0">Raw readings or residuals?</h2><div id="tab" class="scroll"></div>
+      <p class="small">Both alarms use a limit of four standard deviations, set from the first 30 days. A false alarm is a reading over the limit before the real movement began. A thermal model is fitted to the first 30 days by least squares on air temperature delayed by the chosen time.</p></div>
+    <div class="panel note"><p><strong>What to notice.</strong> On the raw readings the limit has to be wide enough to hold the daily swing, so the real movement must grow large before it is seen. On the residuals the same real movement stands out within days. Make the thermal swing larger and the raw alarm gets worse still, while the residual alarm hardly changes.</p></div>
+  </section>
+</div>
+<footer>Copyright &copy; 2026 Yam Khoon Tor. All rights reserved. Companion app to <em>AI for Deformation Monitoring: Anomaly Detection, Trend Analysis and Early Warning for Surveyors and Engineers</em>. For readers’ personal study only. All data are simulated and illustrative; results will be similar to, but not always identical with, the figures in the book. This app is for education and does not replace professional judgement, project specifications or statutory requirements.</footer>
+</main>
+<script src="../assets/core.js"></script>
+<script src="../assets/plot.js"></script>
+<script src="../assets/ml.js"></script>
+<script>
+"use strict";
+const S = AD.stats, C = AD.colours;
+const st = AD.controls("#controls", [
+  { key: "case", type: "select", label: "Structure", value: "bldg", options: [{ value: "bldg", label: "Tower: lean at roof level" }, { value: "brdg", label: "Bridge: deck movement at a bearing" }] },
+  { key: "therm", label: "Thermal response", min: 0, max: 3, step: 0.05, value: 1.2, unit: "mm/°C" },
+  { key: "swing", label: "Daily temperature swing (±)", min: 1, max: 8, step: 0.5, value: 4, unit: "°C" },
+  { key: "real", label: "Size of the real movement", min: 0, max: 15, step: 0.1, value: 7, unit: "mm" },
+  { key: "start", label: "Real movement begins on day", min: 35, max: 100, step: 1, value: 60 },
+  { key: "lag", label: "Thermal delay", min: 0, max: 6, step: 0.5, value: 2, unit: "h" },
+  { key: "noise", label: "Reading noise", min: 0.1, max: 2, step: 0.1, value: 0.5, unit: "mm" },
+  { key: "seed", label: "Random seed", min: 1, max: 50, step: 1, value: 14 }], render);
+const ND = 120, PH = 4, n = ND * 24 / PH * PH, STEP = 1; // hourly
+function render() {
+  const bldg = st.case === "bldg", R = AD.rng(st.seed * 13), N = ND * 24, day = S.range(N).map((i) => i / 24);
+  const dOff = S.range(ND).map(() => R.normal(0, 1.2)), seas = day.map((d) => -3 * Math.cos(2 * Math.PI * d / 365));
+  const temp = day.map((d, i) => 28 + seas[i] + st.swing * Math.sin(2 * Math.PI * ((i % 24) - 9) / 24) + dOff[Math.floor(d)]);
+  const L = Math.round(st.lag), tl = temp.map((_, i) => temp[Math.max(0, i - L)]);
+  // real movement: tower lean grows slowly (logistic), bridge bearing sticks then slips by `real` on the start day
+  // tower: lean grows towards `real` from the start day; bridge: bearing sticks for 28 days (deck barely follows temperature), then slips by `real`
+  const th = tl.map((t) => st.therm * (t - 28)), thS = S.mean(th.slice(st.start * 24 - 24, st.start * 24));
+  const truth = day.map((d, i) => bldg ? (d < st.start ? 0 : st.real * (1 - Math.exp(-(d - st.start) / 18)))
+    : d < st.start ? 0 : d < st.start + 28 ? 0.85 * (thS - th[i]) : st.real);
+  const y = day.map((_, i) => th[i] + truth[i] + R.normal(0, st.noise));
+  // thermal model from days 0-30
+  const B = 30 * 24, A = S.range(B).map((i) => [1, tl[i]]), f = AD.lin.lsq(A, y.slice(0, B)), fit = tl.map((t) => f.x[0] + f.x[1] * t), res = y.map((v, i) => v - fit[i]);
+  const lim = (a) => { const m = S.mean(a.slice(0, B)), s = S.sd(a.slice(0, B)); return [m - 4 * s, m + 4 * s]; };
+  const lr = lim(y), le = lim(res), s0 = st.start * 24;
+  const judge = (a, l) => { let fa = 0; for (let i = B; i < s0; i++) if (a[i] < l[0] || a[i] > l[1]) fa++;
+    let det = null, run = 0; for (let i = s0; i < N; i++) { run = a[i] < l[0] || a[i] > l[1] ? run + 1 : 0; if (run >= 3) { det = i - 2; break; } }
+    return { fa, det }; };
+  const jr = judge(y, lr), je = judge(res, le);
+  const dly = (j) => (j.det === null ? "not detected" : ((j.det - s0) / 24).toFixed(1) + " days after it began");
+  const box = document.getElementById("kpis"); box.innerHTML = "";
+  [["Thermal fit", f.x[1].toFixed(2) + " mm/°C", "true " + st.therm.toFixed(2)], ["Raw alarm band", "±" + ((lr[1] - lr[0]) / 2).toFixed(1) + " mm", "has to hold the daily swing"],
+   ["Residual alarm band", "±" + ((le[1] - le[0]) / 2).toFixed(1) + " mm", "noise only"], ["Real movement", st.real.toFixed(1) + " mm", bldg ? "lean develops from day " + st.start : "bearing sticks on day " + st.start + ", slips on day " + (st.start + 28)]].forEach(([k, v, u]) =>
+    box.append(AD.el("div", { class: "kpi" }, AD.el("div", { class: "k" }, k), AD.el("div", { class: "v" }, v), AD.el("div", { class: "u" }, u))));
+  AD.table("#tab", ["Alarm on", "Band (± mm)", "False alarms before the movement", "Real movement detected"],
+    [["Raw readings", ((lr[1] - lr[0]) / 2).toFixed(1), jr.fa + " h", dly(jr)], ["Residual after thermal model", ((le[1] - le[0]) / 2).toFixed(1), je.fa + " h", dly(je)]],
+    { highlight: (i) => i === 1 });
+  const sp = (a) => a.filter((_, i) => i % 3 === 0), dd = sp(day);
+  const vl = [{ x: st.start, label: bldg ? "lean begins" : "bearing sticks", color: "#777", row: 0 }]; if (!bldg) vl.push({ x: st.start + 28, label: "slip", color: "#777", row: 1 });
+  AD.plot("#c1", { title: (bldg ? "Tower lean at roof level" : "Deck movement at the bearing") + ": raw readings and the raw alarm band", height: 250, ylabel: "mm", legend: "top", xlim: [0, ND],
+    series: [{ x: dd, y: sp(y), color: C.faint, width: 0.6, label: "raw (hourly)" }, { x: dd, y: sp(truth), color: C.orange, width: 2, label: "real movement (truth)" }],
+    hlines: [{ y: lr[0], color: C.alert, dash: [5, 4] }, { y: lr[1], color: C.alert, dash: [5, 4], label: "raw alarm band" }], vlines: vl });
+  AD.plot("#c2", { title: "Residual after removing the thermal model, with the residual alarm band", height: 250, xlabel: "day", ylabel: "mm", legend: "top", xlim: [0, ND],
+    series: [{ x: dd, y: sp(res), color: C.blue, width: 0.8, label: "residual" }, { x: dd, y: sp(truth), color: C.orange, width: 2, label: "real movement (truth)" }],
+    hlines: [{ y: le[0], color: C.alert, dash: [5, 4] }, { y: le[1], color: C.alert, dash: [5, 4], label: "residual alarm band" }], vlines: vl,
+    shade: [{ x0: 0, x1: 30, color: "rgba(184,134,11,0.10)" }] });
+}
+document.getElementById("c_case").addEventListener("change", () => {
+  const b = st.case === "bldg"; const set = (k, v) => { const e = document.getElementById("c_" + k); e.value = v; e.dispatchEvent(new Event("input")); };
+  set("real", b ? 7 : 2.3); set("start", b ? 60 : 60); set("therm", b ? 1.2 : 0.6); set("lag", b ? 2 : 1);
+});
+render(); window.addEventListener("resize", () => setTimeout(render, 100));
+
+</script>
+</body>
+</html>

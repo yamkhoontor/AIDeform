@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>App 15: Spot the Mistake | AI for Deformation Monitoring</title>
+<meta name="description" content="Six flawed analyses: find the mistake, then see the analysis done properly.">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="top"><div class="wrap"><span class="book">AI for Deformation Monitoring &middot; companion apps</span><a class="home" href="../index.html">&larr; All apps</a></div></header>
+<main class="wrap">
+<h1>App 15: Spot the Mistake</h1>
+<p class="sub">Chapter 15 &middot; <span class="badge est">Established</span></p>
+<p>Six short analyses, each with one mistake of the kind Chapter 15 warns about. Look at the chart and the result, choose what you think went wrong, and press Check. Then switch the view to see the same analysis done properly. None of these mistakes needs AI to happen, but AI makes each of them harder to notice.</p>
+<div class="layout">
+  <aside class="panel controls"><h3>Case</h3><div id="controls"></div><div id="verdict" style="margin-top:12px"></div></aside>
+  <section class="out">
+    <div class="panel"><h2 id="head" style="margin-top:0"></h2><p id="story"></p><div class="kpis" id="kpis"></div></div>
+    <div class="panel"><div class="chartbox"><canvas id="c1"></canvas></div></div>
+    <div class="panel note" id="lesson"></div>
+  </section>
+</div>
+<footer>Copyright &copy; 2026 Yam Khoon Tor. All rights reserved. Companion app to <em>AI for Deformation Monitoring: Anomaly Detection, Trend Analysis and Early Warning for Surveyors and Engineers</em>. For readers’ personal study only. All data are simulated and illustrative; results will be similar to, but not always identical with, the figures in the book. This app is for education and does not replace professional judgement, project specifications or statutory requirements.</footer>
+</main>
+<script src="../assets/core.js"></script>
+<script src="../assets/plot.js"></script>
+<script src="../assets/ml.js"></script>
+<script>
+"use strict";
+const S = AD.stats, C = AD.colours, ML = AD.ml;
+const CASES = [
+  { v: "leak", label: "1. The anomaly that was never found", ans: "leak" },
+  { v: "split", label: "2. The forecast that was too good", ans: "split" },
+  { v: "units", label: "3. The sudden jump", ans: "units" },
+  { v: "tz", label: "4. The thermal correction that made things worse", ans: "tz" },
+  { v: "sign", label: "5. The building that rose", ans: "sign" },
+  { v: "gap", label: "6. The alarms that came from nowhere", ans: "gap" }];
+const MIST = [{ value: "", label: "Choose…" }, { value: "leak", label: "Data leakage: the threshold was set with data from the event" },
+  { value: "split", label: "Random split: test data mixed in time with training data" }, { value: "units", label: "Wrong units after an instrument change" },
+  { value: "tz", label: "Wrong time zone between two data sets" }, { value: "sign", label: "Opposite sign conventions merged" },
+  { value: "gap", label: "Gaps silently filled" }];
+let solved = {};
+const st = AD.controls("#controls", [
+  { key: "c", type: "select", label: "Case", value: "leak", options: CASES.map((c) => ({ value: c.v, label: c.label })) },
+  { key: "guess", type: "select", label: "What went wrong?", value: "", options: MIST },
+  { key: "chk", type: "button", label: "Check", onClick: () => check() },
+  { key: "view", type: "select", label: "View", value: "done", options: [{ value: "done", label: "The analysis as it was done" }, { value: "fix", label: "The analysis done properly" }] }], render);
+document.getElementById("c_c").addEventListener("change", () => { const g = document.getElementById("c_guess"); g.value = ""; g.dispatchEvent(new Event("change")); setView("done"); });
+function setView(v) { const e = document.getElementById("c_view"); e.value = v; e.dispatchEvent(new Event("change")); }
+function check() {
+  const c = CASES.find((k) => k.v === st.c), ok = st.guess === c.ans, box = document.getElementById("verdict"); box.innerHTML = "";
+  if (!st.guess) { box.append(AD.el("p", { class: "small" }, "Choose an answer first.")); return; }
+  if (ok) solved[c.v] = true;
+  box.append(AD.el("p", {}, AD.el("strong", {}, ok ? "Correct. " : "Not this time. "), ok ? "Switch the view to see it done properly." : "Look again at the chart, or switch the view for a clue."),
+    AD.el("p", { class: "small" }, "Solved " + Object.keys(solved).length + " of 6."));
+  if (ok) setView("fix");
+}
+const R0 = (s) => AD.rng(s);
+function render() {
+  document.getElementById("verdict").innerHTML = "";
+  const fix = st.view === "fix", K = document.getElementById("kpis"); K.innerHTML = "";
+  const kpi = (k, v, u) => K.append(AD.el("div", { class: "kpi" }, AD.el("div", { class: "k" }, k), AD.el("div", { class: "v" }, v), AD.el("div", { class: "u" }, u || "")));
+  let head, story, lesson;
+  if (st.c === "leak") {
+    const R = R0(3), d = S.range(120), y = d.map((t) => R.normal(0, 0.5) + (t >= 80 ? 0.12 * (t - 80) : 0));
+    const base = fix ? y.slice(0, 60) : y, m = S.mean(base), s = S.sd(base), hi = m + 3 * s, lo = m - 3 * s, first = d.find((t) => t >= 60 && (y[t] > hi || y[t] < lo));
+    head = "The anomaly that was never found"; story = "A prism on a retaining wall is read daily for 120 days. The analyst set the alarm at three standard deviations from the mean and reported that no anomaly occurred.";
+    kpi("Alarm band", "±" + (3 * s).toFixed(1) + " mm", fix ? "from days 0–59 only" : "from all 120 days"); kpi("First alarm", first === undefined ? "none" : "day " + first, "movement began on day 80");
+    AD.plot("#c1", { title: "Prism movement and the alarm band", height: 300, xlabel: "day", ylabel: "mm", legend: false, series: [{ x: d, y, type: "points", size: 2.5, color: C.blue }],
+      hlines: [{ y: hi, color: C.alert, label: "alarm" }, { y: lo, color: C.alert }], shade: [{ x0: fix ? 0 : 0, x1: fix ? 59 : 119, color: "rgba(184,134,11,0.10)" }] });
+    lesson = "The band was set using the whole record, including the movement it was meant to detect, so the movement widened the band and hid itself. A threshold, a scaler or a model must be built only from data before the period it will judge. This is data leakage, and in machine learning it is easy to commit by accident: one call that fits a scaler to the whole data set is enough.";
+  } else if (st.c === "split") {
+    const R = R0(5), n = 60 * 24, t = S.range(n).map((i) => i / 24), y = t.map((d) => 0.004 * d * d + 0.6 * Math.sin(2 * Math.PI * d) + R.normal(0, 0.25));
+    const idx = S.range(n), test = fix ? idx.filter((i) => t[i] >= 48) : R.shuffle(idx.slice()).slice(0, Math.round(n * 0.2)).sort((a, b) => a - b), isT = new Set(test), train = idx.filter((i) => !isT.has(i));
+    // k-nearest neighbours in time: the kind of model that looks brilliant when it can interpolate
+    const pred = test.map((i) => { let L = i - 1, U = i + 1, near = []; while (near.length < 4 && (L >= 0 || U < n)) { if (L >= 0 && !isT.has(L)) near.push(y[L]); if (U < n && !isT.has(U)) near.push(y[U]); L--; U++; } return S.mean(near); });
+    const rmse = Math.sqrt(S.mean(test.map((i, k) => (pred[k] - y[i]) ** 2)));
+    head = "The forecast that was too good"; story = "A machine learning model for hourly tunnel convergence was tested on 20 % of the record and reported an error of " + (fix ? "about 0.3" : rmse.toFixed(2)) + " mm. Then it went live, and its forecasts were far worse.";
+    kpi("Test error", rmse.toFixed(2) + " mm", fix ? "test = last 12 days" : "test = random 20 % of hours"); kpi("Reading noise", "0.25 mm", "no model can beat this honestly");
+    AD.plot("#c1", { title: "Training hours, test hours and the model's predictions", height: 300, xlabel: "day", ylabel: "mm", legend: "top",
+      series: [{ x: train.filter((_, k) => k % 3 === 0).map((i) => t[i]), y: train.filter((_, k) => k % 3 === 0).map((i) => y[i]), type: "points", size: 1.6, color: C.faint, label: "training" },
+        { x: test.map((i) => t[i]), y: test.map((i) => y[i]), type: "points", size: 2, color: C.orange, label: "test (truth)" }, { x: test.map((i) => t[i]), y: pred, type: "points", size: 1.4, color: C.blue, label: "prediction" }] });
+    lesson = "With test hours drawn at random, every test hour has a training hour next to it, so the model only had to fill in gaps, and its error even beat the reading noise. A forecast must be tested on a later period that the model has not seen. Done properly, the same model cannot follow the trend at all once it leaves the training period.";
+  } else if (st.c === "units") {
+    const R = R0(7), d = S.range(100), mm = d.map((t) => 0.05 * t + R.normal(0, 0.15));
+    // from day 55 the new logger reports tenths of a millimetre, and the readings were loaded as millimetres
+    const shown = d.map((t) => (t >= 55 && !fix ? mm[t] * 10 : mm[t]));
+    head = "The sudden jump"; story = "A crack meter was replaced on day 55 during routine maintenance. The anomaly detector flagged a sudden change on the same day, and the report described a sudden movement of the crack.";
+    const jump = shown[55] - shown[54];
+    kpi("Change on day 55", (jump >= 0 ? "+" : "") + jump.toFixed(1) + " mm", fix ? "after converting the new logger's units" : "readings taken as they came"); kpi("Rate after day 55", ((shown[99] - shown[56]) / 43).toFixed(3) + " mm/day", "before: 0.050 mm/day");
+    AD.plot("#c1", { title: "Crack opening", height: 300, xlabel: "day", ylabel: "mm", legend: false, series: [{ x: d, y: shown, type: "points", size: 2.5, color: C.blue }], vlines: [{ x: 55, label: "new instrument", color: "#777" }] });
+    lesson = "The new logger reported in tenths of a millimetre, and the readings were loaded as millimetres. The detector correctly found a change, but the change was in the data, not the structure, and the rate after the change looked ten times faster than it really was. Record every instrument change, check the units and the zero reading at each change, and look at the rate as well as the level.";
+  } else if (st.c === "tz") {
+    const R = R0(9), n = 20 * 48, i0 = S.range(n), h = i0.map((i) => (i % 48) / 2), temp = h.map((x) => 29 + 3 * Math.sin(2 * Math.PI * (x - 9) / 24) + R.normal(0, 0.3));
+    const y = i0.map((i) => 0.4 * (temp[Math.max(0, i - 4)] - 29) - 0.003 * i + R.normal(0, 0.15));
+    const shift = fix ? 0 : 16, tempUsed = i0.map((i) => temp[(i + shift) % n]); // weather data were in UTC, the survey in local time (UTC+8)
+    const lags = S.range(13).map((k) => k / 2), fits = lags.map((lh) => { const k = Math.round(lh * 2), xs = [], ys = []; for (let i = 24; i < n; i++) { xs.push(tempUsed[i - k] - 29); ys.push(y[i] + 0.003 * i); }
+      const f = AD.lin.polyfit(xs, ys, 1), m = S.mean(ys); return { lh, f, r2: 1 - S.sum(ys.map((v, j) => (v - f.x[0] - f.x[1] * xs[j]) ** 2)) / S.sum(ys.map((v) => (v - m) ** 2)) }; });
+    const best = fits.reduce((a, b) => (b.r2 > a.r2 ? b : a)), k = Math.round(best.lh * 2), corr = i0.map((i) => y[i] - best.f.x[1] * (tempUsed[Math.max(0, i - k)] - 29));
+    const sdRaw = S.sd(i0.map((i) => y[i] + 0.003 * i)), sdC = S.sd(i0.map((i) => corr[i] + 0.003 * i));
+    head = "The thermal correction that made things worse"; story = "Settlement readings on a viaduct pier swing with the sun. The analyst brought in air temperature from a weather service, fitted a thermal correction with a delay of 0 to 6 hours, and got a negative coefficient: the pier seemed to settle as it warmed. Half the swing was left behind.";
+    kpi("Best fit", best.f.x[1].toFixed(2) + " mm/°C", "delay " + best.lh + " h, R² " + best.r2.toFixed(2)); kpi("Daily scatter", sdRaw.toFixed(2) + " → " + sdC.toFixed(2) + " mm", "before → after correction");
+    const w = S.range(4 * 48);
+    AD.plot("#c1", { title: "Four days: settlement and air temperature as used", height: 300, xlabel: "day", legend: "top",
+      series: [{ x: w.map((i) => i / 48), y: w.map((i) => y[i] + 0.003 * i), color: C.blue, width: 1.6, label: "settlement (mm, trend removed)" }, { x: w.map((i) => i / 48), y: w.map((i) => (tempUsed[i] - 29) * 0.4), color: C.orange, width: 1.4, dash: [5, 4], label: "air temperature (scaled)" },
+        { x: w.map((i) => i / 48), y: w.map((i) => corr[i] + 0.003 * i - 1.8), color: C.green, width: 1.2, label: "after correction (shifted down 1.8)" }] });
+    lesson = "The weather data were stamped in UTC and the survey in local time, eight hours ahead. The temperature peak appeared at the wrong time of day, so no delay in the search range fitted. Store every time in UTC, or state the zone with every record, and plot the two series together before fitting anything. Done properly, the correction removes most of the swing.";
+  } else if (st.c === "sign") {
+    const R = R0(11), d = S.range(90), sett = d.map((t) => -0.06 * t - (t > 40 ? 0.05 * (t - 40) : 0));
+    const pts = ["BM1", "BM2", "BM3", "BM4", "BM5", "BM6"], fromB = new Set(["BM4", "BM5", "BM6"]);
+    const ser = pts.map((p, j) => d.map((t) => (fromB.has(p) && !fix ? -1 : 1) * (sett[t] * (0.8 + 0.1 * j) + R.normal(0, 0.2))));
+    const end = ser.map((s) => s[89]);
+    head = "The building that rose"; story = "Six settlement markers on a building were read by two survey teams, three markers each, and the data were merged. The report said the building was tilting, with one side rising by about 6 mm while the other settled.";
+    kpi("Markers settling", end.filter((v) => v < 0).length + " of 6", ""); kpi("Markers rising", end.filter((v) => v > 0).length + " of 6", fix ? "" : "BM4–BM6, from team B");
+    AD.plot("#c1", { title: "Settlement markers (negative = down)", height: 300, xlabel: "day", ylabel: "mm", legend: "top", series: ser.map((s, j) => ({ x: d, y: s, color: AD.series[j], width: 1.6, label: pts[j] })) });
+    lesson = "Team A recorded settlement as negative and team B as positive. Merged without a check, half the building appeared to rise. A tilt like this has a cause you can name; if not, suspect the data first. Agree the sign convention in the monitoring specification, store it with the data, and check that a new data source has the same direction as the old one for a known movement.";
+  } else {
+    const R = R0(13), n = 30 * 24, t = S.range(n).map((i) => i / 24), y0 = t.map((d) => -0.3 * d + R.normal(0, 0.2)), gaps = [[150, 170], [330, 336], [500, 540]];
+    const miss = new Array(n).fill(false); gaps.forEach(([a, b]) => { for (let i = a; i < b; i++) miss[i] = true; });
+    const y = y0.map((v, i) => (miss[i] ? (fix ? NaN : 0) : v));
+    const dy = y.map((v, i) => (i === 0 ? NaN : v - y[i - 1])), good = dy.filter(Number.isFinite), med = S.median(good), mad = S.mad(good), lim = 6 * 1.4826 * mad;
+    const alarms = S.range(n).filter((i) => Number.isFinite(dy[i]) && Math.abs(dy[i] - med) > lim);
+    head = "The alarms that came from nowhere"; story = "A settlement sensor on a road embankment raised six step alarms over 30 days. Site checks found nothing wrong, and the client began to ignore the alarms.";
+    kpi("Step alarms", "" + alarms.length, fix ? "gaps left as missing" : "gaps stored as 0"); kpi("Hours missing", "" + miss.filter(Boolean).length, "three logger outages");
+    const keep = S.range(n).filter((i) => Number.isFinite(y[i]));
+    AD.plot("#c1", { title: "Hourly settlement (red marks: step alarms)", height: 300, xlabel: "day", ylabel: "mm", legend: false,
+      series: [{ x: keep.map((i) => t[i]), y: keep.map((i) => y[i]), type: "points", size: 1.8, color: C.blue }, { x: alarms.map((i) => t[i]), y: alarms.map((i) => y[i]), type: "points", size: 5, hollow: true, color: C.suspend }],
+      shade: gaps.map(([a, b]) => ({ x0: a / 24, x1: b / 24, color: "rgba(150,150,150,0.15)" })) });
+    lesson = "The logger stored missing readings as zero, so every outage looked like a jump to zero and back. Each false alarm cost a site visit and some of the client's trust. A gap must stay a gap: store it as missing, show it on the charts, and make sure every detector skips it. Filling gaps by interpolation is no better if it is silent: it can hide a real step that happened while the logger was down.";
+  }
+  document.getElementById("head").textContent = head; document.getElementById("story").textContent = story;
+  const L = document.getElementById("lesson"); L.innerHTML = "";
+  if (fix) L.append(AD.el("p", {}, AD.el("strong", {}, "What went wrong. "), lesson)); else L.append(AD.el("p", {}, AD.el("strong", {}, "Your turn. "), "Choose an answer on the left and press Check. Switch the view to see the analysis done properly."));
+}
+render(); window.addEventListener("resize", () => setTimeout(render, 100));
+
+</script>
+</body>
+</html>

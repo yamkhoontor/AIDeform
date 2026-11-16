@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>App 7: Fault or Movement? | AI for Deformation Monitoring</title>
+<meta name="description" content="Diagnose a jump, a station shift, refraction or real movement, with a classifier&#x27;s suggestion.">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="top"><div class="wrap"><span class="book">AI for Deformation Monitoring &middot; companion apps</span><a class="home" href="../index.html">&larr; All apps</a></div></header>
+<main class="wrap">
+<h1>App 7: Fault or Movement?</h1>
+<p class="sub">Chapter 7 &middot; <span class="badge est">Established</span> <span class="badge early">Early adoption</span></p>
+<p>Eleven tunnel wall prisms, TW10 to TW20, are read every 30 minutes from two total stations. Choose what happens at 02:30 and the app works through the diagnostic questions of Chapter 7, then shows what a random-forest classifier, trained on simulated past flags, suggests as the cause.</p>
+<div class="layout">
+  <aside class="panel controls"><h3>Scenario</h3><div id="controls"></div></aside>
+  <section class="out">
+    <div class="panel"><div class="chartbox"><canvas id="c1"></canvas></div><div class="chartbox"><canvas id="c2"></canvas></div></div>
+    <div class="panel"><h2 style="margin-top:0">Working through the questions</h2><div id="q" class="scroll"></div><p id="concl" style="font-weight:600;margin:10px 0 0"></p></div>
+    <div class="panel"><h2 style="margin-top:0">What the classifier suggests</h2><div class="chartbox"><canvas id="c3"></canvas></div>
+      <p class="small">A random forest of 60 trees, trained on 600 simulated past flags whose causes were known. Its suggestion is a starting point for the surveyor, not a conclusion, and is only as good as the record of past reviews.</p></div>
+  </section>
+</div>
+<footer>Copyright &copy; 2026 Yam Khoon Tor. All rights reserved. Companion app to <em>AI for Deformation Monitoring: Anomaly Detection, Trend Analysis and Early Warning for Surveyors and Engineers</em>. For readers’ personal study only. All data are simulated and illustrative; results will be similar to, but not always identical with, the figures in the book. This app is for education and does not replace professional judgement, project specifications or statutory requirements.</footer>
+</main>
+<script src="../assets/core.js"></script>
+<script src="../assets/plot.js"></script>
+<script src="../assets/ml.js"></script>
+<script>
+"use strict";
+const S = AD.stats, C = AD.colours, ML = AD.ml;
+const SCN = [
+  { value: "knock", label: "Prism TW15 knocked by a crew" }, { value: "block", label: "Line to TW15 blocked for an hour" },
+  { value: "station", label: "Total station TS1 disturbed" }, { value: "ref", label: "Reference prism of TS1 moved" },
+  { value: "refr", label: "Refraction on a hot day" }, { value: "real", label: "Real movement of the wall" }];
+const st = AD.controls("#controls", [
+  { key: "scn", type: "select", label: "What happens at 02:30", value: "knock", options: SCN },
+  { key: "size", label: "Size of the change", min: 1, max: 10, step: 0.5, value: 6.8, unit: "mm" },
+  { key: "log", type: "check", label: "Site log: crew working near TW15, 01:00–03:00", value: true },
+  { key: "noise", label: "Reading noise", min: 0.2, max: 1.2, step: 0.05, value: 0.6, unit: "mm" },
+  { key: "seed", label: "Random seed", min: 1, max: 50, step: 1, value: 8 }], render);
+const pts = S.range(11, 10).map((k) => "TW" + k), station = (p) => (+p.slice(2) <= 15 ? "TS1" : "TS2");
+const n = 48, ev = 17, hours = S.range(n).map((i) => 18 + i / 2), CAUSES = ["prism fault", "station/reference", "refraction", "GNSS multipath", "real movement"];
+// classifier trained once on simulated flags (features as in Chapter 7)
+const RF = (() => { const R = AD.rng(99), X = [], y = [];
+  for (let k = 0; k < 600; k++) { const c = k % 5; let f = { np: 1, ss: R.uniform(0, 0.3), step: R.u() < 0.5, nd: R.normal(0, 0.5), tg: R.normal(0, 1), hr: R.int(24), fix: 1, act: R.u() < 0.2 };
+    if (c === 0) Object.assign(f, { np: 1, nd: R.uniform(3, 10), step: R.u() < 0.6, act: R.u() < 0.6 });
+    if (c === 1) Object.assign(f, { np: 8 + R.int(30), ss: R.uniform(0.8, 1), step: true });
+    if (c === 2) Object.assign(f, { np: 3 + R.int(17), tg: R.uniform(1.5, 4), hr: 11 + R.int(6), step: false });
+    if (c === 3) Object.assign(f, { np: 1, fix: R.u() < 0.3 ? 1 : 0, step: false, nd: R.uniform(1, 4) });
+    if (c === 4) Object.assign(f, { np: 3 + R.int(12), ss: R.uniform(0.2, 0.7), step: false, nd: R.normal(0, 0.8), act: R.u() < 0.7 });
+    X.push([f.np, f.ss, f.step ? 1 : 0, f.nd, f.tg, f.hr, f.fix, f.act ? 1 : 0]); y.push(c); }
+  return ML.randomForest(X, y, { classes: CAUSES, trees: 60, maxDepth: 6, seed: 3 }); })();
+function simulate() {
+  const R = AD.rng(st.seed * 13), D = {}; pts.forEach((p) => (D[p] = hours.map(() => R.normal(0, st.noise))));
+  const ref = hours.map(() => R.normal(0, 0.3)); let tg = 0;
+  if (st.scn === "knock") for (let i = ev; i < n; i++) D.TW15[i] += st.size;
+  if (st.scn === "block") for (let i = ev; i < ev + 2; i++) D.TW15[i] += st.size;
+  if (st.scn === "station") pts.filter((p) => station(p) === "TS1").forEach((p) => { for (let i = ev; i < n; i++) D[p][i] += Math.min(st.size, 3) * (0.8 + 0.05 * (+p.slice(2) - 10)); });
+  if (st.scn === "ref") { pts.filter((p) => station(p) === "TS1").forEach((p) => { for (let i = ev; i < n; i++) D[p][i] += Math.min(st.size, 3) * (0.5 + 0.1 * (+p.slice(2) - 10)); }); for (let i = ev; i < n; i++) ref[i] += Math.min(st.size, 3); }
+  if (st.scn === "refr") { tg = 3; pts.forEach((p) => { const dist = 5 + Math.abs(+p.slice(2) - 15) * 6; hours.forEach((h, i) => (D[p][i] += st.size / 4 * (dist / 35) * Math.max(0, Math.sin(Math.PI * ((h % 24) - 10) / 8)))); }); }
+  if (st.scn === "real") pts.forEach((p) => { const w = Math.exp(-(((+p.slice(2) - 15) / 2.2) ** 2)); for (let i = ev; i < n; i++) D[p][i] += st.size * w * Math.min(1, (i - ev + 1) / 16); });
+  return { D, ref, tg };
+}
+function render() {
+  const { D, ref, tg } = simulate(), base = (p) => S.median(D[p].slice(ev - 6, ev));
+  // each prism's largest change in the 12 readings after 02:30 (for refraction, during the afternoon)
+  const win = st.scn === "refr" ? S.range(12, 34) : S.range(13, ev);
+  const peak = (p) => win.reduce((a, i) => (Math.abs(D[p][i] - base(p)) > Math.abs(D[p][a] - base(p)) ? i : a), win[0]);
+  const focus = pts.reduce((a, p) => (Math.abs(D[p][peak(p)] - base(p)) > Math.abs(D[a][peak(a)] - base(a)) ? p : a), pts[0]);
+  const tF = peak(focus), peakAt = tF;
+  const neigh = pts.filter((p) => Math.abs(+p.slice(2) - +focus.slice(2)) === 1);
+  const fJump = D[focus][tF] - base(focus);
+  const nJump = Math.max(...neigh.map((p) => Math.abs(D[p][tF] - base(p))));
+  const same = pts.filter((p) => station(p) === station(focus) && p !== focus), stJump = S.median(same.map((p) => D[p][tF] - base(p)));
+  const refJump = S.median(ref.slice(ev, ev + 4)) - S.median(ref.slice(0, ev));
+  const after = S.range(4).map((k) => D[focus][Math.min(n - 1, tF + 2 + k)] - base(focus)), permanent = after.every((v) => Math.abs(v) > Math.abs(fJump) / 2);
+  const growing = st.scn !== "refr" && Math.abs(S.median(D[focus].slice(ev + 10, ev + 14)) - base(focus)) > Math.abs(S.median(D[focus].slice(ev, ev + 3)) - base(focus)) * 1.8 + 0.5;
+  const moved = pts.filter((p) => Math.abs(D[p][tF] - base(p)) > 2.8 * st.noise);
+  const hourOf = st.scn === "refr" ? 14 : 2, act = st.log && Math.abs(+focus.slice(2) - 15) <= 1 && st.scn !== "refr";
+  const qrows = [
+    ["Is it alone?", `${focus}: ${fJump.toFixed(1)} mm; largest neighbour change ${nJump.toFixed(1)} mm; ${moved.length} of 11 points moved`, nJump < 0.4 * Math.abs(fJump) ? "Isolated" : "Shared with neighbours"],
+    ["Is the station steady?", `Median change of the other ${station(focus)} points ${stJump.toFixed(1)} mm; reference check ${refJump.toFixed(1)} mm`,
+      Math.abs(refJump) > 1 ? "Reference prism has moved" : Math.abs(stJump) > 1.2 && moved.length >= same.length ? "Every point on this station shifted" : "Station steady"],
+    ["Is it permanent?", "Next four readings: " + after.map((v) => v.toFixed(1)).join(", ") + " mm", growing ? "Growing gradually" : permanent ? "A step" : "A spike that returns"],
+    ["Does it follow the temperature?", st.scn === "refr" ? "Smooth swing peaking in the afternoon, larger on longer sight lines" : "No daily pattern", st.scn === "refr" ? "Yes" : "No"],
+    ["What does the site log say?", st.log ? "Crew working near TW15, 01:00–03:00" : "Nothing recorded", act ? "Activity near the point" : "No activity near the point"]];
+  AD.table("#q", ["Question", "Evidence", "Finding"], qrows);
+  let concl;
+  if (Math.abs(refJump) > 1) concl = "Reference prism disturbed: remove it from the resection, recompute, and do not report tunnel movement.";
+  else if (st.scn === "refr") concl = "Refraction: a smooth thermal swing on long sight lines. Shorten sight lines or use reference prisms near the targets; no movement to report.";
+  else if (Math.abs(stJump) > 1.2 && qrows[1][2].startsWith("Every")) concl = "Station disturbed: check the resection and re-level the instrument; the apparent movement is not real.";
+  else if (nJump < 0.4 * Math.abs(fJump) && !growing) concl = permanent ? "Prism most probably knocked: flag as an instrument issue, request a site visit, re-base the series after inspection."
+    : "Line of sight blocked or wrong target: flag the readings as an instrument issue; no re-basing is needed because the readings returned.";
+  else concl = "Possible real movement: several neighbours moving gradually together. Check other sensors and inform the engineer.";
+  document.getElementById("concl").textContent = "Conclusion: " + concl;
+  const feat = [moved.length || 1, moved.length ? moved.filter((p) => station(p) === station(focus)).length / moved.length : 0, permanent && !growing ? 1 : 0,
+    nJump < 0.4 * Math.abs(fJump) ? Math.abs(fJump) : Math.abs(fJump - nJump), tg, hourOf, 1, act ? 1 : 0];
+  const pr = RF.predictProba(feat);
+  AD.plot("#c3", { height: 200, ylim: [0, 1], ylabel: "probability", legend: false, xticks: CAUSES.map((c, i) => ({ v: i, label: c })), xlim: [-0.6, 4.6],
+    series: [{ x: S.range(5), y: pr, type: "bar", colors: pr.map((v) => (v === Math.max(...pr) ? C.orange : C.blue)) }] });
+  const x = hours.map((h) => h - 18);
+  const xt = [0, 6, 12, 18, 24].map((v) => ({ v, label: String((18 + v) % 24).padStart(2, "0") + ":00" }));
+  AD.plot("#c1", { title: "Wall prisms (" + focus + " highlighted)", height: 260, ylabel: "mm", xticks: xt, legend: "top",
+    series: [...pts.filter((p) => p !== focus).map((p) => ({ x, y: D[p], color: "#9aa3ad", width: 0.8 })), { x, y: D[focus], color: C.orange, width: 2, label: focus }],
+    vlines: [{ x: ev / 2, label: "02:30", color: "#888" }] });
+  const dl = pts.map((p) => { const o = pts.filter((q) => q !== p), w = o.map((q) => Math.exp(-Math.abs(+q.slice(2) - +p.slice(2)) * 6 / 12));
+    const at = tF, v = (q) => D[q][at] - base(q); return v(p) - o.reduce((s, q, k) => s + w[k] * v(q), 0) / S.sum(w); });
+  AD.plot("#c2", { title: "Difference from weighted neighbours (δ)", height: 200, ylabel: "δ (mm)", legend: false, xticks: pts.map((p, i) => ({ v: i, label: p })), xlim: [-0.6, 10.6],
+    series: [{ x: S.range(11), y: dl, type: "bar", colors: pts.map((p) => (p === focus ? C.orange : C.blue)) }],
+    hlines: [{ y: 2.8 * st.noise, color: "#777" }, { y: -2.8 * st.noise, color: "#777" }] });
+}
+render(); window.addEventListener("resize", () => setTimeout(render, 100));
+
+</script>
+</body>
+</html>
