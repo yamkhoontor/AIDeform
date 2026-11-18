@@ -24,9 +24,9 @@ Labels follow Chapter 1 of the book: **Established** methods can be used routine
 | 2 | [Signal and Noise](apps/app02-signal-and-noise.html) | 2 | Established | Mix real movement, a thermal cycle and noise; find the smallest detectable change. |
 | 3 | [Classical Toolkit](apps/app03-classical-toolkit.html) | 3 | Established | Least squares versus Huber, the Kalman filter's surprise value and the congruence test. |
 | 4 | [Control Charts](apps/app04-control-charts.html) | 4 | Established | Tune CUSUM, EWMA and a rate rule on twelve settlement points beside an excavation. |
-| 5 | [Ring Detectors](apps/app05-ring-detectors.html) | 5 | Early adoption | Plant faults, drifts and shape changes in a tunnel ring; compare six detectors. |
+| 5 | [Ring Detectors](apps/app05-ring-detectors.html) | 5 | Early adoption | Plant outliers, drifts and shape changes in a tunnel ring; compare six detectors. |
 | 6 | [Thermal Cycle and Detectors](apps/app06-thermal-cycle-detectors.html) | 6 | Experimental | See how a temperature input changes false alarms, and try an autoencoder. |
-| 7 | [Fault or Movement?](apps/app07-fault-or-movement.html) | 7 | Established, Early adoption | Diagnose a jump, a station shift, refraction or real movement, with a classifier's suggestion. |
+| 7 | [Instrument Fault or Movement?](apps/app07-fault-or-movement.html) | 7 | Established, Early adoption | Diagnose a jump, a station shift, refraction or real movement, with a classifier's suggestion. |
 | 8 | [Thermal Separation](apps/app08-thermal-separation.html) | 8 | Established, Early adoption | Separate trend from the thermal cycle and find when the rate of movement changes. |
 | 9 | [Forecast Lab](apps/app09-forecast-lab.html) | 9 | Established, Early adoption | Compare forecasts and check whether their uncertainty bands are honest. |
 | 10 | [What Drives the Movement?](apps/app10-what-drives-the-movement.html) | 10 | Established, Early adoption | Set the true causes and see whether regression and machine learning recover them. |
