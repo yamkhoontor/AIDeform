@@ -71,7 +71,7 @@ function run() {
 function draw() {
   const { X, temp, ev, res, secs } = last, inEv = (i) => ev.some((e) => i >= e.s && i < e.e);
   const quiet = S.range(n).filter((i) => i >= VA && !inEv(i)).length;
-  AD.table("#tab", ["Detector", "Faults (of 5)", "Drifts (of 5)", "Ring changes (of 5)", "False alarms per 1,000", "Share of false alarms at midday (10:00–16:00)"], res.map((r) => {
+  AD.table("#tab", ["Detector", "Outliers (of 5)", "Drifts (of 5)", "Ring changes (of 5)", "False alarms per 1,000", "Share of false alarms at midday (10:00–16:00)"], res.map((r) => {
     const f = { fault: 0, drift: 0, ring: 0 }; ev.forEach((e) => { if (r.flags.slice(e.s, e.e).some(Boolean)) f[e.type]++; });
     const fa = S.range(n).filter((i) => i >= VA && r.flags[i] && !inEv(i)), mid = fa.filter((i) => (i % 48) >= 20 && (i % 48) < 32).length;
     return [r.name, f.fault, f.drift, f.ring, (fa.length / quiet * 1000).toFixed(1), fa.length ? Math.round(100 * mid / fa.length) + " %" : "–"]; }));

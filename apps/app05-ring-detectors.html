@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>App 5: Ring Detectors | AI for Deformation Monitoring</title>
-<meta name="description" content="Plant faults, drifts and shape changes in a tunnel ring; compare six detectors.">
+<meta name="description" content="Plant outliers, drifts and shape changes in a tunnel ring; compare six detectors.">
 <link rel="stylesheet" href="../assets/style.css">
 </head>
 <body>
@@ -12,14 +12,14 @@
 <main class="wrap">
 <h1>App 5: Ring Detectors</h1>
 <p class="sub">Chapter 5 &middot; <span class="badge early">Early adoption</span></p>
-<p>A simulated tunnel ring of eight prisms is read every 30 minutes for 60 days, giving 24 readings per epoch (radial, tangential and longitudinal). After a clean baseline, you plant three kinds of problem: single-prism faults, slow drifts of one prism, and ring-wide shape changes. Six detectors are trained on the baseline and scored on everything that follows.</p>
+<p>A simulated tunnel ring of eight prisms is read every 30 minutes for 60 days, giving 24 readings per epoch (radial, tangential and longitudinal). After a clean baseline, you plant three kinds of problem: single-prism outliers (as from a knocked prism), slow drifts of one prism, and ring-wide shape changes. Six detectors are trained on the baseline and scored on everything that follows.</p>
 <div class="layout">
   <aside class="panel controls"><h3>Settings</h3><div id="controls"></div><p class="small">Changes are applied when you press Run, because training six detectors takes a few seconds.</p></aside>
   <section class="out">
     <div class="panel"><h2 style="margin-top:0">Events found and false alarms</h2><div id="status" class="busy">Training detectors…</div><div id="tab" class="scroll"></div>
       <p class="small">An event counts as found if any reading inside it is flagged. False alarms are flags outside the planted events, after the baseline, per 1,000 readings. Thresholds are set from the baseline so that about the chosen share of baseline readings would be flagged; the Mahalanobis distance uses its χ² limit.</p></div>
     <div class="panel"><div class="chartbox"><canvas id="c1"></canvas></div><div class="chartbox"><canvas id="c2"></canvas></div></div>
-    <div class="panel note"><p><strong>What to notice.</strong> No single method wins. Per-prism tests catch faults but raise many false alarms, because they run 24 tests at every epoch. Group methods see ring-shape changes that no single prism shows. Isolation Forest, popular elsewhere, struggles to isolate one wrong reading among 24, which is why every AI method needs a classical benchmark.</p></div>
+    <div class="panel note"><p><strong>What to notice.</strong> No single method wins. Per-prism tests catch outliers but raise many false alarms, because they run 24 tests at every epoch. Group methods see ring-shape changes that no single prism shows. Isolation Forest, popular elsewhere, struggles to isolate one wrong reading among 24, which is why every AI method needs a classical benchmark.</p></div>
   </section>
 </div>
 <footer>Copyright &copy; 2026 Yam Khoon Tor. All rights reserved. Companion app to <em>AI for Deformation Monitoring: Anomaly Detection, Trend Analysis and Early Warning for Surveyors and Engineers</em>. For readers’ personal study only. All data are simulated and illustrative; results will be similar to, but not always identical with, the figures in the book. This app is for education and does not replace professional judgement, project specifications or statutory requirements.</footer>
@@ -32,8 +32,8 @@
 const S = AD.stats, C = AD.colours, ML = AD.ml;
 const DET = ["Robust z-score, per prism", "CUSUM, per prism", "Isolation Forest, ring", "One-Class SVM, ring", "LOF, ring", "Mahalanobis, ring"];
 const st = AD.controls("#controls", [
-  { key: "nf", label: "Single-prism faults", min: 0, max: 10, step: 1, value: 10 },
-  { key: "fsize", label: "Fault size", min: 1, max: 10, step: 0.5, value: 6, unit: "mm" },
+  { key: "nf", label: "Single-prism outliers", min: 0, max: 10, step: 1, value: 10 },
+  { key: "fsize", label: "Outlier size", min: 1, max: 10, step: 0.5, value: 6, unit: "mm" },
   { key: "nd", label: "Slow drifts (40 hours)", min: 0, max: 5, step: 1, value: 5 },
   { key: "dsize", label: "Drift size", min: 0.5, max: 4, step: 0.25, value: 2, unit: "mm" },
   { key: "nr", label: "Ring shape changes (6 hours)", min: 0, max: 5, step: 1, value: 5 },
@@ -87,14 +87,14 @@ function draw() {
   const rows = DET.map((name, d) => { const found = { fault: 0, drift: 0, ring: 0 }; ev.forEach((e) => { if (flags[d].slice(e.s, e.e).some(Boolean)) found[e.type]++; });
     const fa = flags[d].filter((f, i) => f && i >= base && !ev.some((e) => i >= e.s && i < e.e)).length;
     return [name, found.fault + " / " + cnt("fault"), found.drift + " / " + cnt("drift"), found.ring + " / " + cnt("ring"), (fa / nOut * 1000).toFixed(1)]; });
-  AD.table("#tab", ["Detector", "Faults found", "Drifts found", "Ring changes found", "False alarms per 1,000"], rows, { highlight: (i) => i === parseInt(st.show) });
+  AD.table("#tab", ["Detector", "Outliers found", "Drifts found", "Ring changes found", "False alarms per 1,000"], rows, { highlight: (i) => i === parseInt(st.show) });
   const s = document.getElementById("status"); s.className = "small"; s.textContent = "Done in " + secs.toFixed(1) + " s.";
   // chart: one week of radial readings from the first planted ring change (or the first event)
   const e0 = ev.find((e) => e.type === "ring") || ev[0] || { s: base + 200 };
   const a = Math.max(base, e0.s - 3 * 48), b = Math.min(n, a + 7 * 48), x = S.range(b - a, a).map((i) => i / 48);
   const ser = S.range(P).map((p) => ({ x, y: x.map((_, k) => X[a + k][3 * p]), color: AD.series[p], width: 0.7 }));
   const shade = ev.filter((e) => e.e > a && e.s < b).map((e) => ({ x0: e.s / 48, x1: Math.max(e.e, e.s + 2) / 48, color: e.type === "ring" ? "rgba(46,139,87,0.22)" : e.type === "drift" ? "rgba(184,134,11,0.22)" : "rgba(198,40,40,0.22)" }));
-  AD.plot("#c1", { title: "Radial readings of the eight prisms (one week). Shading: red fault, gold drift, green ring change", height: 260, ylabel: "mm", series: ser, shade, legend: false });
+  AD.plot("#c1", { title: "Radial readings of the eight prisms (one week). Shading: red outlier, gold drift, green ring change", height: 260, ylabel: "mm", series: ser, shade, legend: false });
   const d = parseInt(st.show), fx = x.filter((_, k) => flags[d][a + k]);
   AD.plot("#c2", { title: "Flags raised by: " + DET[d], height: 130, xlabel: "day", ylim: [0, 1.2], xlim: [x[0], x[x.length - 1]], shade, legend: false,
     series: [{ x: fx, y: fx.map(() => 0.6), type: "points", size: 3, color: C.suspend }] });
