@@ -3,14 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>App 7: Fault or Movement? | AI for Deformation Monitoring</title>
+<title>App 7: Instrument Fault or Movement? | AI for Deformation Monitoring</title>
 <meta name="description" content="Diagnose a jump, a station shift, refraction or real movement, with a classifier&#x27;s suggestion.">
 <link rel="stylesheet" href="../assets/style.css">
 </head>
 <body>
 <header class="top"><div class="wrap"><span class="book">AI for Deformation Monitoring &middot; companion apps</span><a class="home" href="../index.html">&larr; All apps</a></div></header>
 <main class="wrap">
-<h1>App 7: Fault or Movement?</h1>
+<h1>App 7: Instrument Fault or Movement?</h1>
 <p class="sub">Chapter 7 &middot; <span class="badge est">Established</span> <span class="badge early">Early adoption</span></p>
 <p>Eleven tunnel wall prisms, TW10 to TW20, are read every 30 minutes from two total stations. Choose what happens at 02:30 and the app works through the diagnostic questions of Chapter 7, then shows what a random-forest classifier, trained on simulated past flags, suggests as the cause.</p>
 <div class="layout">
@@ -41,7 +41,7 @@ const st = AD.controls("#controls", [
   { key: "noise", label: "Reading noise", min: 0.2, max: 1.2, step: 0.05, value: 0.6, unit: "mm" },
   { key: "seed", label: "Random seed", min: 1, max: 50, step: 1, value: 8 }], render);
 const pts = S.range(11, 10).map((k) => "TW" + k), station = (p) => (+p.slice(2) <= 15 ? "TS1" : "TS2");
-const n = 48, ev = 17, hours = S.range(n).map((i) => 18 + i / 2), CAUSES = ["prism fault", "station/reference", "refraction", "GNSS multipath", "real movement"];
+const n = 48, ev = 17, hours = S.range(n).map((i) => 18 + i / 2), CAUSES = ["prism problem", "station/reference", "refraction", "GNSS multipath", "real movement"];
 // classifier trained once on simulated flags (features as in Chapter 7)
 const RF = (() => { const R = AD.rng(99), X = [], y = [];
   for (let k = 0; k < 600; k++) { const c = k % 5; let f = { np: 1, ss: R.uniform(0, 0.3), step: R.u() < 0.5, nd: R.normal(0, 0.5), tg: R.normal(0, 1), hr: R.int(24), fix: 1, act: R.u() < 0.2 };
