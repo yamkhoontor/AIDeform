@@ -22,7 +22,9 @@ Labels follow Chapter 1 of the book: **Established** methods can be used routine
 |---|---|---|---|---|
 | 1 | [Maturity Explorer](apps/app01-maturity-explorer.html) | 1 | Established, Early adoption, Experimental | See which methods suit a monitoring task and how mature each one is. |
 | 2 | [Signal and Noise](apps/app02-signal-and-noise.html) | 2 | Established | Mix real movement, a thermal cycle and noise; find the smallest detectable change. |
-| 3 | [Classical Toolkit](apps/app03-classical-toolkit.html) | 3 | Established | Least squares versus Huber, the Kalman filter's surprise value and the congruence test. |
+| 3.1 | [Least Squares and Robust Fitting](apps/app03-classical-toolkit.html) | 3 | Established | Fit a trend, test its significance, and compare least squares with a robust Huber fit. |
+| 3.2 | [Kalman Filter](apps/app03-2-kalman-filter.html) | 3 | Established | Follow a point reading by reading: estimate, velocity, surprise and forecast, step by step. |
+| 3.3 | [Congruence Test](apps/app03-3-congruence-test.html) | 3 | Established | Has the control network kept its shape? Test the network and find the points that moved. |
 | 4 | [Control Charts](apps/app04-control-charts.html) | 4 | Established | Tune CUSUM, EWMA and a rate rule on twelve settlement points beside an excavation. |
 | 5 | [Ring Detectors](apps/app05-ring-detectors.html) | 5 | Early adoption | Plant outliers, drifts and shape changes in a tunnel ring; compare six detectors. |
 | 6 | [Thermal Cycle and Detectors](apps/app06-thermal-cycle-detectors.html) | 6 | Experimental | See how a temperature input changes false alarms, and try an autoencoder. |
