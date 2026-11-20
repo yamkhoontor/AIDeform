@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>App 3.2: Kalman Filter | AI for Deformation Monitoring</title>
+<meta name="description" content="Follow a point reading by reading with a Kalman filter: estimate, velocity, surprise and forecast.">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="top"><div class="wrap"><span class="book">AI for Deformation Monitoring &middot; companion apps</span><a class="home" href="../index.html">&larr; All apps</a></div></header>
+<main class="wrap">
+<h1>App 3.2: Kalman Filter</h1>
+<p class="sub">Chapter 3 &middot; <span class="badge est">Established</span></p>
+<p>A settlement point is read once a day for 60 days. A Kalman filter follows it reading by reading, estimating where the point is and how fast it is moving, flagging readings that surprise it, and forecasting ahead with an uncertainty band. Change the movement, the noise and the filter's agility, and follow the calculation step by step.</p>
+<div class="layout"><aside class="panel controls"><h3>Settings</h3><div id="controls"></div></aside>
+<section class="out">
+<div class="panel"><div class="kpis" id="kpis"></div></div>
+<div class="panel"><div class="chartbox"><canvas id="c1"></canvas></div><div class="chartbox"><canvas id="c2"></canvas></div><div class="chartbox"><canvas id="c3"></canvas></div></div>
+<div class="panel"><h2 style="margin-top:0">Step by step: the last six days</h2><div id="tab" class="scroll"></div>
+<p class="small">Each day the filter predicts the reading from yesterday's estimate and velocity, compares the prediction with the reading (the innovation), and moves part of the way towards the reading. The share it moves is the gain. The surprise is the innovation divided by its expected size; beyond ±2.58 the reading is flagged (99 %). This is the calculation of Section 3.3, here with the velocity estimated too.</p></div>
+<div class="panel note"><p><strong>What to notice.</strong> Raise the agility and the filter follows changes faster but becomes noisier; lower it and the estimate is smooth but slow to react. A sudden jump gives a large surprise on the day it happens. Untick "treat a flagged reading as a step" and the filter takes days to catch up, flagging reading after reading; in practice a confirmed step is accepted and the filter restarted from it. Start an acceleration and watch the velocity estimate climb, and the forecast band widen with the forecast horizon. Move "today" back to see what the filter would have said earlier.</p></div>
+</section></div>
+<style>.tool{display:grid;grid-template-columns:240px 1fr;gap:16px}@media(max-width:820px){.tool{grid-template-columns:1fr}}</style>
+<footer>Copyright &copy; 2026 Yam Khoon Tor. All rights reserved. Companion app to <em>AI for Deformation Monitoring: Anomaly Detection, Trend Analysis and Early Warning for Surveyors and Engineers</em>. For readers’ personal study only. All data are simulated and illustrative; results will be similar to, but not always identical with, the figures in the book. This app is for education and does not replace professional judgement, project specifications or statutory requirements.</footer>
+</main>
+<script src="../assets/core.js"></script>
+<script src="../assets/plot.js"></script>
+<script src="../assets/ml.js"></script>
+<script>
+"use strict";
+const S = AD.stats, C = AD.colours, D = AD.dist;
+const st = AD.controls("#controls", [
+  { key: "rate", label: "Steady settlement rate", min: 0, max: 0.5, step: 0.01, value: 0.12, unit: "mm/day" },
+  { key: "acc", label: "Acceleration after day 40", min: 0, max: 0.03, step: 0.002, value: 0, unit: "mm/day²", decimals: 3 },
+  { key: "jump", label: "Size of jump", min: 0, max: 10, step: 0.5, value: 4, unit: "mm" },
+  { key: "jday", label: "Day of jump", min: 5, max: 59, step: 1, value: 32 },
+  { key: "sigma", label: "Reading noise, σ", min: 0.1, max: 1.5, step: 0.05, value: 0.3, unit: "mm" },
+  { key: "q", label: "Filter agility (log10 of process noise)", min: -6, max: -1, step: 0.5, value: -3.5 },
+  { key: "reset", type: "check", label: "Treat a flagged reading as a step and restart the level from it", value: true },
+  { key: "today", label: "Today", min: 10, max: 60, step: 1, value: 60, unit: "day", decimals: 0 },
+  { key: "H", label: "Forecast horizon", min: 1, max: 20, step: 1, value: 7, unit: "days", decimals: 0 },
+  { key: "seed", label: "Random seed", min: 1, max: 50, step: 1, value: 7 }], render);
+function filter(z, sigma, q, reset) {   // constant-velocity Kalman filter, daily steps, with every intermediate quantity kept
+  const R = sigma * sigma, out = []; let x = [z[0], 0], P = [[R, 0], [0, 0.25]];
+  for (let k = 0; k < z.length; k++) {
+    let xp = x, Pp = P;
+    if (k > 0) { xp = [x[0] + x[1], x[1]];
+      Pp = [[P[0][0] + P[0][1] + P[1][0] + P[1][1] + q / 3, P[0][1] + P[1][1] + q / 2], [P[1][0] + P[1][1] + q / 2, P[1][1] + q]]; }
+    const inn = z[k] - xp[0], Sv = Pp[0][0] + R, K = [Pp[0][0] / Sv, Pp[1][0] / Sv];
+    x = [xp[0] + K[0] * inn, xp[1] + K[1] * inn];
+    P = [[(1 - K[0]) * Pp[0][0], (1 - K[0]) * Pp[0][1]], [Pp[1][0] - K[1] * Pp[0][0], Pp[1][1] - K[1] * Pp[0][1]]];
+    if (reset && k > 0 && Math.abs(inn / Math.sqrt(Sv)) > 2.58) { x = [z[k], xp[1]]; P = [[R, 0], [0, Pp[1][1]]]; }
+    out.push({ pred: xp[0], z: z[k], inn, es: Math.sqrt(Sv), sur: k ? inn / Math.sqrt(Sv) : 0, K: K[0], d: x[0], v: x[1], P: P.map((r) => r.slice()) });
+  }
+  return out;
+}
+function render() {
+  const R = AD.rng(st.seed * 11), N = 61, days = S.range(N);
+  const truth = days.map((d) => st.rate * d + (d > 40 ? 0.5 * st.acc * (d - 40) ** 2 : 0) + (d >= st.jday ? st.jump : 0));
+  const z = truth.map((t) => t + R.normal(0, st.sigma));
+  const T = st.today, q = Math.pow(10, st.q), kf = filter(z.slice(0, T + 1), st.sigma, q, st.reset), now = kf[T];
+  const flags = kf.map((k, i) => i).filter((i) => i > 0 && Math.abs(kf[i].sur) > 2.58);
+  const fc = S.range(st.H + 1).map((h) => ML.kalmanAhead({ d: now.d, v: now.v, P: now.P }, h, { q, sigma: 0 }));
+  const box = document.getElementById("kpis"); box.innerHTML = "";
+  [["Readings flagged (|surprise| > 2.58)", flags.length ? "day " + flags.join(", ") : "none", flags.length > 3 ? "too many? lower the agility or check the noise" : ""],
+   ["Velocity on day " + T, now.v.toFixed(3) + " ± " + Math.sqrt(now.P[1][1]).toFixed(3), "mm/day (true " + (st.rate + (T > 40 ? st.acc * (T - 40) : 0)).toFixed(3) + ")"],
+   ["Forecast for day " + (T + st.H), fc[st.H].m.toFixed(1) + " ± " + (2 * fc[st.H].s).toFixed(1) + " mm", "95 % band; true value " + (st.rate * (T + st.H) + (T + st.H > 40 ? 0.5 * st.acc * (T + st.H - 40) ** 2 : 0) + (T + st.H >= st.jday ? st.jump : 0)).toFixed(1) + " mm"]].forEach(([k, v, u]) =>
+    box.append(AD.el("div", { class: "kpi" }, AD.el("div", { class: "k" }, k), AD.el("div", { class: "v" }, v), AD.el("div", { class: "u" }, u))));
+  const dT = S.range(T + 1), dF = S.range(st.H + 1).map((h) => T + h);
+  AD.plot("#c1", { title: "Settlement, the filter's estimate and its forecast", height: 270, ylabel: "mm", legend: "top", xlim: [0, 60 + 20],
+    series: [{ x: dF, y: fc.map((f) => f.m - 2 * f.s), y2: fc.map((f) => f.m + 2 * f.s), type: "band", color: C.blue, label: "95 % forecast band" },
+      { x: days, y: z, type: "points", size: 2.4, color: C.faint, label: "all readings" },
+      { x: dT, y: z.slice(0, T + 1), type: "points", size: 2.6, color: C.grey, label: "readings to today" },
+      { x: dT, y: kf.map((k) => k.d), color: C.blue, width: 2, label: "Kalman estimate" },
+      { x: dF, y: fc.map((f) => f.m), color: C.blue, width: 1.5, dash: [5, 4] },
+      { x: flags, y: flags.map((i) => z[i]), type: "points", hollow: true, size: 7, color: C.suspend, label: "flagged" }],
+    vlines: [{ x: T, label: "today", color: "#888" }] });
+  AD.plot("#c2", { title: "Velocity estimate with 95 % band", height: 200, ylabel: "mm/day", legend: false, xlim: [0, 80],
+    series: [{ x: dT, y: kf.map((k) => k.v - 2 * Math.sqrt(k.P[1][1])), y2: kf.map((k) => k.v + 2 * Math.sqrt(k.P[1][1])), type: "band", color: C.green },
+      { x: dT, y: kf.map((k) => k.v), color: C.green, width: 2 }] });
+  AD.plot("#c3", { title: "Surprise: innovation ÷ its expected size", height: 190, xlabel: "day", legend: false, xlim: [0, 80],
+    series: [{ x: dT, y: kf.map((k) => k.sur), type: "bar", colors: kf.map((k) => (Math.abs(k.sur) > 2.58 ? C.suspend : C.blue)) }],
+    hlines: [{ y: 2.58, color: C.suspend, label: "+2.58" }, { y: -2.58, color: C.suspend }] });
+  const rows = S.range(6).map((j) => T - 5 + j).filter((i) => i >= 1).map((i) => { const k = kf[i];
+    return [i, k.pred.toFixed(2), k.z.toFixed(2), k.inn.toFixed(2), k.es.toFixed(2), k.sur.toFixed(1), k.K.toFixed(2), k.d.toFixed(2), k.v.toFixed(3)]; });
+  AD.table("#tab", ["Day", "Prediction (mm)", "Reading (mm)", "Innovation (mm)", "Expected size (mm)", "Surprise", "Gain", "Estimate (mm)", "Velocity (mm/day)"], rows,
+    { highlight: (i, r) => Math.abs(parseFloat(r[5])) > 2.58 });
+}
+const ML = AD.ml; render(); window.addEventListener("resize", () => setTimeout(render, 100));
+</script>
+</body>
+</html>

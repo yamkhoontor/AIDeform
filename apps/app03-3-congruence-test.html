@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>App 3.3: Congruence Test | AI for Deformation Monitoring</title>
+<meta name="description" content="Has the control network kept its shape? Run the global congruence test and find the points that moved.">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="top"><div class="wrap"><span class="book">AI for Deformation Monitoring &middot; companion apps</span><a class="home" href="../index.html">&larr; All apps</a></div></header>
+<main class="wrap">
+<h1>App 3.3: Congruence Test</h1>
+<p class="sub">Chapter 3 &middot; <span class="badge est">Established</span></p>
+<p>Five points of a control network are surveyed in two epochs. Move one or two of them, set the precision of the survey, and see whether the global congruence test finds that the network has deformed, and which points are responsible. The sample calculation of Section 3.4 is the same test applied to one point at a time.</p>
+<div class="layout"><aside class="panel controls"><h3>Settings</h3><div id="controls"></div></aside>
+<section class="out">
+<div class="panel"><div class="kpis" id="kpis"></div></div>
+<div class="panel grid2"><div><canvas id="plan" style="width:100%;display:block"></canvas><p class="small" id="pn"></p></div>
+<div><h2 style="margin-top:0">Point by point</h2><div id="tab" class="scroll"></div><p class="small" id="steps"></p></div></div>
+<div class="panel note"><p><strong>What to notice.</strong> The settings start with the sample calculation of Section 3.4: point A moves 6 mm and point B 1.5 mm, with a standard deviation of 1.5 mm per coordinate. A gives a test value of 4.0, above 3.00, and has moved; B gives 0.25 and has not. The global test asks one question of the whole network, has it kept its shape? With only one of five points moved it is diluted by the stable ones; increase A's movement and it fails too, and localisation then removes the largest movement first until the rest pass. Raise the standard deviation to 3 mm and the same 6 mm is no longer significant: a movement is always judged against the precision of the survey. Tick "add survey noise" to see how random errors blur the picture.</p></div>
+</section></div>
+<style>.tool{display:grid;grid-template-columns:240px 1fr;gap:16px}@media(max-width:820px){.tool{grid-template-columns:1fr}}</style>
+<footer>Copyright &copy; 2026 Yam Khoon Tor. All rights reserved. Companion app to <em>AI for Deformation Monitoring: Anomaly Detection, Trend Analysis and Early Warning for Surveyors and Engineers</em>. For readers’ personal study only. All data are simulated and illustrative; results will be similar to, but not always identical with, the figures in the book. This app is for education and does not replace professional judgement, project specifications or statutory requirements.</footer>
+</main>
+<script src="../assets/core.js"></script>
+<script src="../assets/plot.js"></script>
+<script src="../assets/ml.js"></script>
+<script>
+"use strict";
+const S = AD.stats, C = AD.colours, D = AD.dist;
+const NAMES = ["A", "B", "C", "D", "E"], XY = [[0, 0], [130, 10], [200, 110], [110, 195], [10, 150]];
+const st = AD.controls("#controls", [
+  { key: "p1", type: "select", label: "Point that moves", value: "A", options: NAMES.map((n) => ({ value: n, label: "Point " + n })) },
+  { key: "m1", label: "Its movement", min: 0, max: 15, step: 0.5, value: 6, unit: "mm" },
+  { key: "dir", label: "Direction of movement", min: 0, max: 359, step: 1, value: 127, unit: "° from north", decimals: 0 },
+  { key: "p2", type: "select", label: "Second point that moves", value: "B", options: [{ value: "none", label: "None" }, ...NAMES.map((n) => ({ value: n, label: "Point " + n }))] },
+  { key: "m2", label: "Its movement", min: 0, max: 15, step: 0.5, value: 1.5, unit: "mm" },
+  { key: "dir2", label: "Its direction", min: 0, max: 359, step: 1, value: 53, unit: "° from north", decimals: 0 },
+  { key: "sigma", label: "Standard deviation per coordinate, each epoch", min: 0.3, max: 3, step: 0.1, value: 1.5, unit: "mm" },
+  { key: "noise", type: "check", label: "Add survey noise (untick to see the exact sample calculation)", value: false },
+  { key: "seed", label: "Random seed", min: 1, max: 50, step: 1, value: 5 }], render);
+function render() {
+  const R = AD.rng(st.seed * 13), sd2 = 2 * st.sigma * st.sigma;    // variance of a coordinate difference between two epochs
+  const th = st.dir * Math.PI / 180;
+  const d = NAMES.map((n, i) => { let e = 0, nn = 0;
+    if (n === st.p1) { e += st.m1 * Math.sin(th); nn += st.m1 * Math.cos(th); }
+    if (n === st.p2 && st.p2 !== st.p1) { const t2 = st.dir2 * Math.PI / 180; e += st.m2 * Math.sin(t2); nn += st.m2 * Math.cos(t2); }
+    if (st.noise) { e += R.normal(0, Math.sqrt(sd2)); nn += R.normal(0, Math.sqrt(sd2)); }
+    return [e, nn]; });
+  const Ti = d.map(([e, n]) => (e * e + n * n) / sd2 / 2), Fc = (h) => D.chi2Ppf(0.95, h) / h;
+  const glob = (idx) => ({ T: S.sum(idx.map((i) => Ti[i] * 2)) / (2 * idx.length), F: Fc(2 * idx.length) });
+  let rem = S.range(NAMES.length); const g0 = glob(rem); let g = g0; const removed = [];
+  while (g.T > g.F && rem.length > 1) { const w = rem.reduce((a, i) => (Ti[i] > Ti[a] ? i : a), rem[0]); removed.push(w); rem = rem.filter((i) => i !== w); g = glob(rem); }
+  const box = document.getElementById("kpis"); box.innerHTML = "";
+  const sig = S.range(NAMES.length).filter((i) => Ti[i] > 3.0), big = Ti.indexOf(Math.max(...Ti));
+  [["Global test", g0.T.toFixed(2) + (g0.T > g0.F ? " > " : " ≤ ") + g0.F.toFixed(2), g0.T > g0.F ? "network has deformed" : "network has kept its shape"],
+   ["Largest single-point test", NAMES[big] + ": " + Ti[big].toFixed(2), (Ti[big] > 3 ? "> 3.00, significant" : "≤ 3.00, not significant")],
+   ["Points that have moved", [...new Set([...removed, ...sig])].map((i) => NAMES[i]).join(", ") || "none", "at 95 %"]].forEach(([k, v, u]) =>
+    box.append(AD.el("div", { class: "kpi" }, AD.el("div", { class: "k" }, k), AD.el("div", { class: "v" }, v), AD.el("div", { class: "u" }, u))));
+  AD.table("#tab", ["Point", "ΔE (mm)", "ΔN (mm)", "Shift (mm)", "Test value", "Finding"], NAMES.map((n, i) => [n, d[i][0].toFixed(1), d[i][1].toFixed(1), Math.hypot(...d[i]).toFixed(1), Ti[i].toFixed(2),
+    removed.includes(i) ? "moved (found by localisation, step " + (removed.indexOf(i) + 1) + ")" : Ti[i] > 3 ? "moved (own test > 3.00)" : "stable"]), { highlight: (i) => removed.includes(i) || Ti[i] > 3 });
+  document.getElementById("steps").textContent = "Test value of a point = (ΔE² + ΔN²) ÷ (2 × " + sd2.toFixed(2) + " mm²), compared with 3.00, the 95 % value of F with 2 and ∞ degrees of freedom. The global test averages the test values of all five points and compares the result with " + g0.F.toFixed(2) + ". " +
+    (removed.length ? "Localisation: after removing " + removed.map((i) => NAMES[i]).join(" then ") + ", the remaining points give " + g.T.toFixed(2) + " ≤ " + g.F.toFixed(2) + ", so they are stable." : (sig.length ? "Here the global test passes, because one moved point is diluted by the stable ones; the point's own test still finds it. This is why both are checked." : ""));
+  // plan
+  const cv = document.getElementById("plan"), W = cv.clientWidth || 420, H = Math.round(W * 0.95), dpr = window.devicePixelRatio || 1;
+  cv.width = W * dpr; cv.height = H * dpr; cv.style.height = H + "px"; const c = cv.getContext("2d"); c.scale(dpr, dpr);
+  const dark = matchMedia("(prefers-color-scheme: dark)").matches, ink = dark ? "#ddd" : "#222", soft = dark ? "#666" : "#bbb";
+  c.fillStyle = dark ? "#1b1f24" : "#fff"; c.fillRect(0, 0, W, H);
+  const pad = 40, sc = (W - 2 * pad) / 220, X = (x) => pad + (x + 10) * sc, Y = (y) => H - pad - (y + 10) * sc * 0.95, ex = 4 * sc;  // vectors shown 4 mm per metre of plan
+  c.strokeStyle = soft; c.lineWidth = 1; c.setLineDash([3, 3]);
+  [[0, 1], [1, 2], [2, 3], [3, 4], [4, 0], [0, 2], [1, 3], [2, 4], [3, 0], [4, 1]].forEach(([a, b]) => { c.beginPath(); c.moveTo(X(XY[a][0]), Y(XY[a][1])); c.lineTo(X(XY[b][0]), Y(XY[b][1])); c.stroke(); });
+  c.setLineDash([]);
+  NAMES.forEach((n, i) => { const x = X(XY[i][0]), y = Y(XY[i][1]), r95 = Math.sqrt(sd2 * 2 * 3.0) * ex;
+    c.strokeStyle = (removed.includes(i) || Ti[i] > 3) ? C.suspend : soft; c.lineWidth = 1; c.beginPath(); c.arc(x, y, r95, 0, 7); c.stroke();
+    c.strokeStyle = (removed.includes(i) || Ti[i] > 3) ? C.suspend : C.blue; c.fillStyle = c.strokeStyle; c.lineWidth = 2; c.beginPath(); c.moveTo(x, y); const x2 = x + d[i][0] * ex, y2 = y - d[i][1] * ex; c.lineTo(x2, y2); c.stroke();
+    const a = Math.atan2(y2 - y, x2 - x); if (Math.hypot(x2 - x, y2 - y) > 6) { c.beginPath(); c.moveTo(x2, y2); c.lineTo(x2 - 7 * Math.cos(a - 0.4), y2 - 7 * Math.sin(a - 0.4)); c.lineTo(x2 - 7 * Math.cos(a + 0.4), y2 - 7 * Math.sin(a + 0.4)); c.closePath(); c.fill(); }
+    c.fillStyle = ink; c.beginPath(); c.moveTo(x, y - 6); c.lineTo(x + 5.5, y + 4); c.lineTo(x - 5.5, y + 4); c.closePath(); c.fill();
+    c.font = "bold 13px system-ui, sans-serif"; c.fillText(n, x + 8, y - 8); c.fillStyle = C.blue; });
+  c.fillStyle = ink; c.font = "12px system-ui, sans-serif"; c.fillText("Plan of the network (points about 100 m apart)", 8, 16);
+  document.getElementById("pn").textContent = "Arrows: movement between the two epochs, greatly enlarged. Circles: the movement a point would need to be significant at 95 % (" + Math.sqrt(sd2 * 6).toFixed(1) + " mm). Red: points found to have moved.";
+}
+render(); window.addEventListener("resize", () => setTimeout(render, 100));
+</script>
+</body>
+</html>

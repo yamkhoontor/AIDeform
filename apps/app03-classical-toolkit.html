@@ -3,23 +3,20 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>App 3: Classical Toolkit | AI for Deformation Monitoring</title>
-<meta name="description" content="Least squares versus Huber, the Kalman filter&#x27;s surprise value and the congruence test.">
+<title>App 3.1: Least Squares and Robust Fitting | AI for Deformation Monitoring</title>
+<meta name="description" content="Fit a trend by least squares, test its significance, and compare it with a robust Huber fit when gross errors are present.">
 <link rel="stylesheet" href="../assets/style.css">
 </head>
 <body>
 <header class="top"><div class="wrap"><span class="book">AI for Deformation Monitoring &middot; companion apps</span><a class="home" href="../index.html">&larr; All apps</a></div></header>
 <main class="wrap">
-<h1>App 3: Classical Toolkit</h1>
+<h1>App 3.1: Least Squares and Robust Fitting</h1>
 <p class="sub">Chapter 3 &middot; <span class="badge est">Established</span></p>
-<p>Three classical tools are the benchmarks for every AI method in the book. Add gross errors and compare least squares with a robust Huber fit; insert a jump and watch the Kalman filter's surprise value; move a network point and run the congruence test.</p>
-<div class="panel"><h2 style="margin-top:0">1. Trend fitting: least squares and Huber</h2>
+<p>Least squares is the backbone of deformation analysis and the first benchmark every AI method must beat. Fit a straight line to 40 daily readings, see the rate with its standard deviation and t-test, then add gross errors and compare least squares with a robust Huber fit.</p>
+<div class="panel"><h2 style="margin-top:0">Trend fitting: least squares and Huber</h2>
   <div class="tool"><div class="tc" id="ctl1"></div><div><div class="kpis" id="k1"></div><div class="chartbox"><canvas id="c1"></canvas></div></div></div></div>
-<div class="panel" style="margin-top:14px"><h2 style="margin-top:0">2. Kalman filter: following a point and measuring surprise</h2>
-  <div class="tool"><div class="tc" id="ctl2"></div><div><div class="kpis" id="k2"></div><div class="chartbox"><canvas id="c2a"></canvas></div><div class="chartbox"><canvas id="c2b"></canvas></div></div></div></div>
-<div class="panel" style="margin-top:14px"><h2 style="margin-top:0">3. Congruence test: has the network kept its shape?</h2>
-  <div class="tool"><div class="tc" id="ctl3"></div><div><div class="kpis" id="k3"></div><div id="t3" class="scroll" style="margin-top:10px"></div><p class="small" id="n3"></p></div></div></div>
-<div class="panel note" style="margin-top:14px"><p><strong>What to notice.</strong> A few gross errors drag the least squares line; the Huber fit stays close to the true rate. The Kalman filter's surprise jumps at a sudden step. In the congruence test, a movement smaller than about three times the reading precision is hard to detect, exactly as Chapter 2 predicts.</p></div>
+<div class="panel note" style="margin-top:14px"><p><strong>What to notice.</strong> With no gross errors, least squares gives the rate and its standard deviation, and the t-test says whether the movement is real (Section 3.1). Add a few gross errors and the least squares line is dragged away; the Huber fit gives them less and less weight and stays close to the true rate (Section 3.2). Make the true rate small and the noise large, and the t-test can no longer tell the movement from noise.</p>
+<p class="small">The other two classical tools of Chapter 3 have their own apps: <a href="app03-2-kalman-filter.html">App 3.2: Kalman Filter</a> and <a href="app03-3-congruence-test.html">App 3.3: Congruence Test</a>.</p></div>
 <style>.tool{display:grid;grid-template-columns:240px 1fr;gap:16px}@media(max-width:820px){.tool{grid-template-columns:1fr}}</style>
 <footer>Copyright &copy; 2026 Yam Khoon Tor. All rights reserved. Companion app to <em>AI for Deformation Monitoring: Anomaly Detection, Trend Analysis and Early Warning for Surveyors and Engineers</em>. For readers’ personal study only. All data are simulated and illustrative; results will be similar to, but not always identical with, the figures in the book. This app is for education and does not replace professional judgement, project specifications or statutory requirements.</footer>
 </main>
@@ -48,57 +45,17 @@ function draw1() {
   bad.forEach((i) => (y[i] += (i < 20 ? 1 : -1) * s1.size * R.uniform(0.85, 1.15)));
   const ls = AD.lin.lsq(t.map((x) => [1, x]), y), hb = huber(t, y, s1.k);
   const box = document.getElementById("k1"); box.innerHTML = "";
-  [["True rate", s1.rate.toFixed(3)], ["Least squares", ls.x[1].toFixed(3)], ["Huber (robust)", hb.f.x[1].toFixed(3)]].forEach(([k, v]) =>
-    box.append(AD.el("div", { class: "kpi" }, AD.el("div", { class: "k" }, k), AD.el("div", { class: "v" }, v), AD.el("div", { class: "u" }, "mm/day"))));
+  const sv = Math.sqrt(ls.cov[1][1]), tval = ls.x[1] / sv, tcrit = AD.dist.tPpf(0.975, ls.dof);
+  [["True rate", s1.rate.toFixed(3), "mm/day"], ["Least squares", ls.x[1].toFixed(3) + " ± " + sv.toFixed(3), "mm/day"], ["Huber (robust)", hb.f.x[1].toFixed(3), "mm/day"],
+   ["t-test of the least squares rate", "t = " + tval.toFixed(1), (Math.abs(tval) > tcrit ? "significant" : "not significant") + " (95 % value " + tcrit.toFixed(2) + ")"]].forEach(([k, v, u]) =>
+    box.append(AD.el("div", { class: "kpi" }, AD.el("div", { class: "k" }, k), AD.el("div", { class: "v" }, v), AD.el("div", { class: "u" }, u))));
   AD.plot("#c1", { height: 280, xlabel: "day", ylabel: "mm", legend: "top", series: [
     { x: t, y, type: "points", color: C.grey, label: "readings" },
     { x: bad, y: bad.map((i) => y[i]), type: "points", hollow: true, size: 7, color: AD.colours.suspend, label: "gross errors" },
     { x: t, y: t.map((x) => ls.x[0] + ls.x[1] * x), color: C.orange, dash: [6, 4], label: "least squares" },
     { x: t, y: t.map((x) => hb.f.x[0] + hb.f.x[1] * x), color: C.blue, width: 2.2, label: "Huber" }] });
 }
-// ---------- 2. Kalman filter
-const s2 = AD.controls("#ctl2", [
-  { key: "jump", label: "Size of jump", min: 0, max: 10, step: 0.5, value: 4, unit: "mm" },
-  { key: "day", label: "Day of jump", min: 5, max: 38, step: 1, value: 30 },
-  { key: "sigma", label: "Noise, σ", min: 0.2, max: 2, step: 0.1, value: 0.8, unit: "mm" },
-  { key: "q", label: "Filter agility (process noise, log10)", min: -6, max: -1, step: 0.5, value: -3 },
-  { key: "seed", label: "Random seed", min: 1, max: 50, step: 1, value: 4 }], draw2);
-function draw2() {
-  const R = AD.rng(s2.seed + 100), t = S.range(40);
-  const z = t.map((d) => -0.12 * d - 0.002 * d * d + R.normal(0, s2.sigma) + (d >= s2.day ? s2.jump : 0));
-  const kf = AD.ml.kalmanCV(z, { sigma: s2.sigma, q: Math.pow(10, s2.q) }), T = kf.map((k) => k.T), lim = AD.dist.chi2Ppf(0.99, 1);
-  const flagged = t.filter((d) => d > 0 && T[d] > lim);
-  const box = document.getElementById("k2"); box.innerHTML = "";
-  [["Days flagged (99 % limit " + lim.toFixed(2) + ")", flagged.length ? flagged.join(", ") : "none"], ["Velocity on day 39", kf[39].v.toFixed(3) + " mm/day"]].forEach(([k, v]) =>
-    box.append(AD.el("div", { class: "kpi" }, AD.el("div", { class: "k" }, k), AD.el("div", { class: "v" }, v))));
-  AD.plot("#c2a", { height: 230, ylabel: "mm", legend: "top", series: [{ x: t, y: z, type: "points", color: C.grey, label: "readings" }, { x: t, y: kf.map((k) => k.d), color: C.blue, width: 2, label: "Kalman filter" }],
-    vlines: [{ x: s2.day, label: "jump inserted", color: "#888" }] });
-  AD.plot("#c2b", { height: 190, xlabel: "day", ylabel: "surprise T", series: [{ x: t, y: T, type: "bar", color: C.blue, colors: T.map((v) => (v > lim ? AD.colours.suspend : C.blue)) }],
-    hlines: [{ y: lim, color: AD.colours.suspend, label: "99 % limit" }] });
-}
-// ---------- 3. Congruence test
-const s3 = AD.controls("#ctl3", [
-  { key: "move", label: "Movement of point C", min: 0, max: 12, step: 0.5, value: 6, unit: "mm" },
-  { key: "moveE", label: "Movement of point E", min: 0, max: 12, step: 0.5, value: 0, unit: "mm" },
-  { key: "sigma", label: "Precision per coordinate, σ", min: 0.3, max: 3, step: 0.1, value: 1, unit: "mm" },
-  { key: "seed", label: "Random seed", min: 1, max: 50, step: 1, value: 5 }], draw3);
-function draw3() {
-  const R = AD.rng(s3.seed + 200), names = ["A", "B", "C", "D", "E"], f = 20, sg = s3.sigma;
-  const mv = names.map((n) => (n === "C" ? s3.move : n === "E" ? s3.moveE : 0) / Math.SQRT2);
-  const d = []; names.forEach((_, i) => { d.push(mv[i] + R.normal(0, sg) - R.normal(0, sg)); d.push(-mv[i] + R.normal(0, sg) - R.normal(0, sg)); });
-  let chi = 0; for (let i = 0; i < f; i++) chi += R.normal() ** 2; const s0sq = sg * sg * chi / f;
-  const test = (idx) => { const h = idx.length * 2; let q = 0; idx.forEach((i) => (q += (d[2 * i] ** 2 + d[2 * i + 1] ** 2) / 2)); return { T: q / (h * s0sq), F: AD.dist.fPpf(0.95, h, f) }; };
-  let rem = S.range(5); const steps = []; let g = test(rem); const global = g;
-  while (g.T > g.F && rem.length > 1) { const w = rem.reduce((a, i) => (d[2 * i] ** 2 + d[2 * i + 1] ** 2 > d[2 * a] ** 2 + d[2 * a + 1] ** 2 ? i : a), rem[0]);
-    steps.push(names[w]); rem = rem.filter((i) => i !== w); g = test(rem); }
-  const box = document.getElementById("k3"); box.innerHTML = "";
-  [["Global test T", global.T.toFixed(2)], ["Critical F (95 %)", global.F.toFixed(2)], ["Verdict", global.T > global.F ? "Movement" : "Congruent"]].forEach(([k, v]) =>
-    box.append(AD.el("div", { class: "kpi" }, AD.el("div", { class: "k" }, k), AD.el("div", { class: "v" }, v))));
-  AD.table("#t3", ["Point", "ΔE (mm)", "ΔN (mm)", "Shift (mm)", "Finding"], names.map((n, i) => [n, d[2 * i].toFixed(1), d[2 * i + 1].toFixed(1), Math.hypot(d[2 * i], d[2 * i + 1]).toFixed(1),
-    steps.includes(n) ? "moved (removed, step " + (steps.indexOf(n) + 1) + ")" : "stable"]), { highlight: (i) => steps.includes(names[i]) });
-  document.getElementById("n3").textContent = "Points are removed one at a time, largest shift first, until the remaining points pass the test (T = " + g.T.toFixed(2) + " ≤ F = " + g.F.toFixed(2) + "). Pooled degrees of freedom f = " + f + ".";
-}
-const all = () => { draw1(); draw2(); draw3(); }; all(); window.addEventListener("resize", () => setTimeout(all, 100));
+draw1(); window.addEventListener("resize", () => setTimeout(draw1, 100));
 
 </script>
 </body>
